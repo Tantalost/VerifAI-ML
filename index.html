@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VerifAI - AI Image Detection System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-gradient-to-br from-gray-900 via-blue-900 to-gray-900 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-black/30 backdrop-blur-md border-b border-white/10">
+        <div class="container mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                        <i class="fas fa-shield-alt text-white text-xl"></i>
+                    </div>
+                    <h1 class="text-2xl font-bold text-white">VerifAI</h1>
+                </div>
+                <div class="hidden md:flex items-center space-x-8">
+                    <a href="#home" class="text-gray-300 hover:text-white transition-colors">Home</a>
+                    <a href="#about" class="text-gray-300 hover:text-white transition-colors">About</a>
+                    <a href="#detect" class="text-gray-300 hover:text-white transition-colors">Detect</a>
+                    <a href="#features" class="text-gray-300 hover:text-white transition-colors">Features</a>
+                </div>
+                <button id="mobileMenuBtn" class="md:hidden text-white">
+                    <i class="fas fa-bars text-xl"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Mobile Menu -->
+    <div id="mobileMenu" class="hidden fixed inset-0 bg-black/95 z-50 md:hidden">
+        <div class="flex flex-col items-center justify-center h-full space-y-8">
+            <a href="#home" class="text-2xl text-gray-300 hover:text-white transition-colors">Home</a>
+            <a href="#about" class="text-2xl text-gray-300 hover:text-white transition-colors">About</a>
+            <a href="#detect" class="text-2xl text-gray-300 hover:text-white transition-colors">Detect</a>
+            <a href="#features" class="text-2xl text-gray-300 hover:text-white transition-colors">Features</a>
+            <button id="closeMobileMenu" class="text-white">
+                <i class="fas fa-times text-2xl"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Hero Section -->
+    <section id="home" class="container mx-auto px-6 py-20">
+        <div class="text-center mb-16">
+            <h2 class="text-5xl md:text-6xl font-bold text-white mb-6">
+                AI Image Detection System
+                <span class="block text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-600">
+                    Powered by MT-YOLOv6
+                </span>
+            </h2>
+            <p class="text-xl text-gray-300 max-w-3xl mx-auto mb-8">
+                Detect AI-generated, manipulated, or misleading images with advanced machine learning technology. 
+                Get real-time detection results with credibility scoring.
+            </p>
+            <div class="flex flex-col sm:flex-row gap-4 justify-center">
+                <button onclick="scrollToSection('detect')" class="px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all transform hover:scale-105">
+                    <i class="fas fa-search mr-2"></i>Start Detection
+                </button>
+                <button onclick="scrollToSection('about')" class="px-8 py-4 bg-white/10 backdrop-blur-sm text-white rounded-lg font-semibold hover:bg-white/20 transition-all border border-white/20">
+                    <i class="fas fa-info-circle mr-2"></i>Learn More
+                </button>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+            <div class="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
+                <div class="text-3xl font-bold text-blue-400 mb-2">95%+</div>
+                <div class="text-gray-300">Detection Accuracy</div>
+            </div>
+            <div class="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
+                <div class="text-3xl font-bold text-purple-400 mb-2">&lt;2s miss u</div>
+                <div class="text-gray-300">Processing Time</div>
+            </div>
+            <div class="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
+                <div class="text-3xl font-bold text-green-400 mb-2">24/7</div>
+                <div class="text-gray-300">Available</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- About Section -->
+    <section id="about" class="container mx-auto px-6 py-20">
+        <div class="max-w-4xl mx-auto">
+            <h3 class="text-4xl font-bold text-white text-center mb-12">About VerifAI</h3>
+            <div class="bg-white/5 backdrop-blur-sm rounded-2xl p-8 border border-white/10">
+                <p class="text-gray-300 leading-relaxed mb-6">
+                    VerifAI is a cutting-edge Machine Learning-based AI Image Detection System designed to combat the growing threat of AI-generated misinformation. 
+                    Using the advanced MT-YOLOv6 architecture, our system analyzes visual content to determine authenticity with remarkable accuracy.
+                </p>
+                <p class="text-gray-300 leading-relaxed mb-6">
+                    The system integrates sophisticated credibility scoring mechanisms to provide users with comprehensive insights about image reliability, 
+                    helping to create a safer digital environment for everyone.
+                </p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="flex items-start space-x-3">
+                        <i class="fas fa-brain text-blue-400 text-xl mt-1"></i>
+                        <div>
+                            <h4 class="text-white font-semibold mb-1">Advanced AI Technology</h4>
+                            <p class="text-gray-400 text-sm">Powered by MT-YOLOv6 for real-time detection</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start space-x-3">
+                        <i class="fas fa-chart-line text-purple-400 text-xl mt-1"></i>
+                        <div>
+                            <h4 class="text-white font-semibold mb-1">Credibility Scoring</h4>
+                            <p class="text-gray-400 text-sm">Quantitative reliability assessment</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start space-x-3">
+                        <i class="fas fa-bolt text-yellow-400 text-xl mt-1"></i>
+                        <div>
+                            <h4 class="text-white font-semibold mb-1">Real-time Processing</h4>
+                            <p class="text-gray-400 text-sm">Instant analysis and results</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start space-x-3">
+                        <i class="fas fa-shield-alt text-green-400 text-xl mt-1"></i>
+                        <div>
+                            <h4 class="text-white font-semibold mb-1">Privacy Protection</h4>
+                            <p class="text-gray-400 text-sm">Secure image processing</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Detection Section -->
+    <section id="detect" class="container mx-auto px-6 py-20">
+        <div class="max-w-4xl mx-auto">
+            <h3 class="text-4xl font-bold text-white text-center mb-12">Image Detection</h3>
+            
+            <!-- Upload Area -->
+            <div id="uploadArea" class="bg-white/5 backdrop-blur-sm rounded-2xl p-8 border border-white/10 border-dashed border-2 hover:border-blue-400 transition-colors">
+                <div class="text-center">
+                    <i class="fas fa-cloud-upload-alt text-6xl text-blue-400 mb-4"></i>
+                    <h4 class="text-2xl font-semibold text-white mb-2">Upload Image for Analysis</h4>
+                    <p class="text-gray-400 mb-6">Drag and drop an image here or click to browse</p>
+                    <input type="file" id="fileInput" accept="image/*" class="hidden">
+                    <button onclick="document.getElementById('fileInput').click()" class="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all">
+                        <i class="fas fa-folder-open mr-2"></i>Choose Image
+                    </button>
+                    <p class="text-gray-500 text-sm mt-4">Supported formats: JPG, PNG (Max 10MB)</p>
+                </div>
+            </div>
+
+            <!-- Preview Area -->
+            <div id="previewArea" class="hidden bg-white/5 backdrop-blur-sm rounded-2xl p-6 border border-white/10">
+                <!-- Original Image -->
+                <div class="mb-6">
+                    <h4 class="text-xl font-semibold text-white mb-4">Original Image</h4>
+                    <div class="relative max-w-2xl mx-auto">
+                        <img id="originalImage" src="" alt="Original" class="w-full rounded-lg max-h-96 object-contain">
+                        <div id="imageOverlay" class="absolute inset-0 pointer-events-none"></div>
+                    </div>
+                </div>
+                
+                <!-- Results Section -->
+                <div>
+                    <h4 class="text-xl font-semibold text-white mb-4">Analysis Results</h4>
+                    <div id="results" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Results will be populated here -->
+                    </div>
+                </div>
+                
+                <!-- Action Buttons -->
+                <div class="flex flex-col sm:flex-row gap-4 mt-8 justify-center">
+                    <button onclick="analyzeImage()" class="px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-semibold hover:from-green-600 hover:to-emerald-700 transition-all">
+                        <i class="fas fa-search mr-2"></i>Analyze Image
+                    </button>
+                    <button onclick="resetDetection()" class="px-6 py-3 bg-white/10 backdrop-blur-sm text-white rounded-lg font-semibold hover:bg-white/20 transition-all border border-white/20">
+                        <i class="fas fa-redo mr-2"></i>Upload New Image
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="container mx-auto px-6 py-20">
+        <h3 class="text-4xl font-bold text-white text-center mb-12">Key Features</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
+            <div class="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-colors">
+                <i class="fas fa-eye text-3xl text-blue-400 mb-4"></i>
+                <h4 class="text-xl font-semibold text-white mb-2">Visual Feature Extraction</h4>
+                <p class="text-gray-400">Identifies unique patterns and artifacts associated with AI-generated images</p>
+            </div>
+            <div class="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-colors">
+                <i class="fas fa-tachometer-alt text-3xl text-purple-400 mb-4"></i>
+                <h4 class="text-xl font-semibold text-white mb-2">Real-time Processing</h4>
+                <p class="text-gray-400">Get instant results with our optimized MT-YOLOv6 architecture</p>
+            </div>
+            <div class="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-colors">
+                <i class="fas fa-percentage text-3xl text-green-400 mb-4"></i>
+                <h4 class="text-xl font-semibold text-white mb-2">Confidence Scoring</h4>
+                <p class="text-gray-400">Detailed confidence levels and credibility metrics for each analysis</p>
+            </div>
+            <div class="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-colors">
+                <i class="fas fa-map-marked-alt text-3xl text-yellow-400 mb-4"></i>
+                <h4 class="text-xl font-semibold text-white mb-2">Visual Annotations</h4>
+                <p class="text-gray-400">Highlighted regions showing detected anomalies and AI patterns</p>
+            </div>
+            <div class="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-colors">
+                <i class="fas fa-lock text-3xl text-indigo-400 mb-4"></i>
+                <h4 class="text-xl font-semibold text-white mb-2">Privacy First</h4>
+                <p class="text-gray-400">Local processing ensures your images remain private and secure</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-black/50 backdrop-blur-sm border-t border-white/10 mt-20">
+        <div class="container mx-auto px-6 py-12">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                <div>
+                    <div class="flex items-center space-x-3 mb-4">
+                        <div class="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                            <i class="fas fa-shield-alt text-white"></i>
+                        </div>
+                        <h4 class="text-xl font-bold text-white">VerifAI</h4>
+                    </div>
+                    <p class="text-gray-400">AI Image Detection System powered by MT-YOLOv6</p>
+                </div>
+                <div>
+                    <h5 class="text-white font-semibold mb-4">Quick Links</h5>
+                    <ul class="space-y-2">
+                        <li><a href="#home" class="text-gray-400 hover:text-white transition-colors">Home</a></li>
+                        <li><a href="#about" class="text-gray-400 hover:text-white transition-colors">About</a></li>
+                        <li><a href="#detect" class="text-gray-400 hover:text-white transition-colors">Detect</a></li>
+                        <li><a href="#features" class="text-gray-400 hover:text-white transition-colors">Features</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h5 class="text-white font-semibold mb-4">Technology</h5>
+                    <ul class="space-y-2">
+                        <li><span class="text-gray-400">MT-YOLOv6</span></li>
+                        <li><span class="text-gray-400">Machine Learning</span></li>
+                        <li><span class="text-gray-400">Computer Vision</span></li>
+                        <li><span class="text-gray-400">Deep Learning</span></li>
+                    </ul>
+                </div>
+                <div>
+                    <h5 class="text-white font-semibold mb-4">Team</h5>
+                    <p class="text-gray-400 text-sm">Alviar, Justin James E.</p>
+                    <p class="text-gray-400 text-sm">Arobi, Rashdy</p>
+                    <p class="text-gray-400 text-sm">Climaco, John Lloyd L.</p>
+                    <p class="text-gray-400 text-sm">Mamiala, Denabhar</p>
+                    <p class="text-gray-400 text-sm">Lagoyo, Shadia</p>
+                </div>
+            </div>
+            <div class="border-t border-white/10 mt-8 pt-8 text-center">
+                <p class="text-gray-400">© 2026 VerifAI. IT 322 - Machine Learning Project. WMSU College of Computing Studies</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
