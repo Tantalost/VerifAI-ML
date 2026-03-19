@@ -12,7 +12,7 @@ class YOLODetector:
             # or the specific YOLOv6 repository's architecture definition.
             # We are using torch.hub.load as a common standard for PyTorch YOLO implementations.
             # You will replace 'yolov5' with your local YOLOv6 implementation path.
-            self.model = torch.hub.load('ultralytics/yolov5', 'custom', path=model_path, force_reload=False)
+            self.model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
             self.model.eval() # Set to evaluation mode
             print("Model loaded successfully.")
         except Exception as e:
