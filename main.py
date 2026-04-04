@@ -1,4 +1,7 @@
 import io
+import os
+from pathlib import Path
+
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
@@ -16,8 +19,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def resolve_model_path() -> str:
+    env_model_path = os.getenv("MODEL_PATH")
+    candidates = [
+        env_model_path,
+        "weights/best.pt",
+        "yolov5s.pt",
+    ]
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if Path(candidate).exists():
+            return candidate
+
+    # Keep a deterministic fallback and fail with a clear error in YOLODetector.
+    return env_model_path or "weights/best.pt"
+
+
 # Initialize the model once at startup
-MODEL_PATH = "weights/best.pt" # Path to your trained MT-YOLOv6 weights
+MODEL_PATH = resolve_model_path()
 detector = YOLODetector(model_path=MODEL_PATH)
 
 def calculate_credibility(detections: list) -> dict:
@@ -71,6 +92,7 @@ async def analyze_image(file: UploadFile = File(...)):
             "dimensions": image.size,
             "analysis": credibility_report,
             "detections": detections, # Array of bounding boxes to draw on the UI
+            "model_path": MODEL_PATH,
             "message": "Analysis complete."
         }
 

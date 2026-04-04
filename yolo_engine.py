@@ -1,20 +1,22 @@
+from pathlib import Path
+
 import torch
-import numpy as np
 from PIL import Image
+from ultralytics import YOLO
 
 class YOLODetector:
     def __init__(self, model_path: str):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Loading YOLO model on {self.device}...")
-        
+
         try:
-            # For YOLOv6, you typically load the model via standard torch.load 
-            # or the specific YOLOv6 repository's architecture definition.
-            # We are using torch.hub.load as a common standard for PyTorch YOLO implementations.
-            # You will replace 'yolov5' with your local YOLOv6 implementation path.
-            self.model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-            self.model.eval() # Set to evaluation mode
-            print("Model loaded successfully.")
+            weights_path = Path(model_path)
+            if not weights_path.exists():
+                raise FileNotFoundError(f"Model weights not found: {weights_path}")
+
+            # Load your trained detector weights (YOLOv8/YOLOv5 .pt exported by training).
+            self.model = YOLO(str(weights_path))
+            print(f"Model loaded successfully from {weights_path}.")
         except Exception as e:
             print(f"Failed to load model: {e}")
             self.model = None
@@ -23,26 +25,34 @@ class YOLODetector:
         if self.model is None:
             raise RuntimeError("Model is not initialized.")
 
-        # Run inference
-        results = self.model(image)
-        
-        # Extract predictions: [xmin, ymin, xmax, ymax, confidence, class]
-        predictions = results.pandas().xyxy[0]
-        
-        # Filter out low-confidence detections
-        filtered_preds = predictions[predictions['confidence'] >= confidence_threshold]
-        
+        # Run inference and keep only detections over the configured confidence threshold.
+        results = self.model.predict(
+            source=image,
+            conf=confidence_threshold,
+            device=0 if self.device.type == "cuda" else "cpu",
+            verbose=False,
+        )
+
         detections = []
-        for index, row in filtered_preds.iterrows():
-            detections.append({
-                "class_name": row['name'],
-                "confidence": float(row['confidence']),
-                "box": {
-                    "xmin": float(row['xmin']),
-                    "ymin": float(row['ymin']),
-                    "xmax": float(row['xmax']),
-                    "ymax": float(row['ymax'])
-                }
-            })
-            
+        for result in results:
+            names = result.names or {}
+            if result.boxes is None:
+                continue
+
+            for box in result.boxes:
+                xyxy = box.xyxy[0].tolist()
+                class_id = int(box.cls[0].item()) if box.cls is not None else -1
+                class_name = names.get(class_id, str(class_id))
+
+                detections.append({
+                    "class_name": class_name,
+                    "confidence": float(box.conf[0].item()),
+                    "box": {
+                        "xmin": float(xyxy[0]),
+                        "ymin": float(xyxy[1]),
+                        "xmax": float(xyxy[2]),
+                        "ymax": float(xyxy[3]),
+                    },
+                })
+
         return detections

@@ -1,0 +1,11 @@
+.magic-rings-container {
+  position: fixed;
+  inset: 0; /* full viewport */
+  width: 100vw;
+  height: 100vh;
+  z-index: 0; /* keep behind main content */
+  pointer-events: none; /* let UI be interactive over it */
+  mix-blend-mode: screen; /* blend softly with dark bg */
+  opacity: 0.7;
+}
+
