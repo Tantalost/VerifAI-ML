@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import TrueFocus from './components/TrueFocus.jsx';
-import MagicRings from './components/MagicRings.jsx';
+import LightPillar from './components/LightPillar.jsx';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
@@ -266,52 +266,44 @@ function App() {
       {/* Animated gradient background layer */}
       <div className="bg-anim"></div>
       {/* Full-viewport animated background */}
-      <MagicRings
-        color="#fc42ff"
-        colorTwo="#42fcff"
-        ringCount={6}
-        speed={1}
-        attenuation={10}
-        lineThickness={2}
-        baseRadius={0.35}
-        radiusStep={0.1}
-        scaleRate={0.1}
-        opacity={1}
-        blur={0}
-        noiseAmount={0.1}
-        rotation={0}
-        ringGap={1.5}
-        fadeIn={0.7}
-        fadeOut={0.5}
-        followMouse={false}
-        mouseInfluence={0.2}
-        hoverScale={1.2}
-        parallax={0.05}
-        clickBurst={false}
+      <LightPillar
+        topColor="#48FF28"
+        bottomColor="#9EF19E"
+        intensity={1}
+        rotationSpeed={0.1}
+        glowAmount={0.002}
+        pillarWidth={2}
+        pillarHeight={0.3}
+        noiseIntensity={0.5}
+        pillarRotation={25}
+        viewScale={1}
+        diagonalTilt={0}
+        interactive={false}
+        mixBlendMode="normal"
       />
 
       <div className="relative z-10">
-      <nav className="bg-black/30 backdrop-blur-md border-b border-white/10">
-        <div className="container mx-auto px-6 py-4">
+      <div className="container mx-auto px-6 pt-8 md:pt-10">
+        <nav className="hero-nav-pill">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                <i className="fas fa-shield-alt text-white text-xl"></i>
+            <a href="#home" className="flex items-center space-x-3 text-white/90 hover:text-white transition-colors">
+              <div className="w-9 h-9 hero-logo-badge rounded-full flex items-center justify-center">
+                <i className="fas fa-shield-alt text-white text-sm"></i>
               </div>
-              <h1 className="text-2xl font-bold text-white">VerifAI</h1>
+              <h1 className="text-lg md:text-xl font-semibold tracking-wide">VerifAI</h1>
+            </a>
+            <div className="hidden md:flex items-center gap-8 pr-2">
+              <a href="#home" className="hero-nav-link">Home</a>
+              <a href="#about" className="hero-nav-link">About</a>
+              <a href="#detect" className="hero-nav-link">Detect</a>
+              <a href="#features" className="hero-nav-link">Features</a>
             </div>
-            <div className="hidden md:flex items-center space-x-8">
-              <a href="#home" className="text-gray-300 hover:text-white transition-colors">Home</a>
-              <a href="#about" className="text-gray-300 hover:text-white transition-colors">About</a>
-              <a href="#detect" className="text-gray-300 hover:text-white transition-colors">Detect</a>
-              <a href="#features" className="text-gray-300 hover:text-white transition-colors">Features</a>
-            </div>
-            <button onClick={() => setMobileOpen(true)} className="md:hidden text-white">
+            <button onClick={() => setMobileOpen(true)} className="md:hidden text-white/90">
               <i className="fas fa-bars text-xl"></i>
             </button>
           </div>
-        </div>
-      </nav>
+        </nav>
+      </div>
 
       {mobileOpen && (
         <div className="fixed inset-0 bg-black/95 z-50 md:hidden">
@@ -327,45 +319,35 @@ function App() {
         </div>
       )}
 
-      <section id="home" className="container mx-auto px-6 pt-28 pb-20 min-h-screen">
-          <div className="text-center mb-16">
-            <div className="mb-6">
-              <TrueFocus
-                sentence="AI Image Detection System|Powered by MT-YOLOv6"
-                separator="|"
-                vertical={true}
-                manualMode={false}
-                blurAmount={5}
-                borderColor="#5227FF"
-                animationDuration={0.5}
-                pauseBetweenAnimations={1}
-              />
-            </div>
-            <p className="text-xl text-gray-300 max-w-3xl mx-auto mb-8">
-              Detect AI-generated, manipulated, or misleading images with advanced machine learning technology. 
-              Get real-time detection results with credibility scoring.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <a href="#detect" className="px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all transform hover:scale-105 inline-flex items-center justify-center">
-                <i className="fas fa-search mr-2"></i>Start Detection
-              </a>
-              <a href="#about" className="px-8 py-4 bg-white/10 backdrop-blur-sm text-white rounded-lg font-semibold hover:bg-white/20 transition-all border border-white/20 inline-flex items-center justify-center">
-                <i className="fas fa-info-circle mr-2"></i>Learn More
-              </a>
-            </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
-            <div className="text-3xl font-bold text-blue-400 mb-2">95%+</div>
-            <div className="text-gray-300">Detection Accuracy</div>
+      <section id="home" className="container mx-auto px-6 pt-16 md:pt-20 pb-20 min-h-[78vh] md:min-h-[82vh] flex items-center justify-center">
+        <div className="text-center max-w-4xl w-full">
+          <div className="hero-top-badge mb-8">
+            <i className="fas fa-sparkles mr-2 text-[0.68rem]"></i>
+            AI Image Detection
           </div>
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
-            <div className="text-3xl font-bold text-purple-400 mb-2">&lt;2s</div>
-            <div className="text-gray-300">Processing Time</div>
+          <div className="mb-6 hero-focus-wrap">
+            <TrueFocus
+              sentence="AI Image Detection System|Powered by YOLOv5"
+              separator="|"
+              vertical={true}
+              manualMode={false}
+              blurAmount={5}
+              borderColor="#48FF28"
+              glowColor="rgba(72, 255, 40, 0.55)"
+              animationDuration={0.5}
+              pauseBetweenAnimations={1}
+            />
           </div>
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10">
-            <div className="text-3xl font-bold text-green-400 mb-2">24/7</div>
-            <div className="text-gray-300">Available</div>
+          <p className="text-base md:text-lg text-gray-300/95 max-w-2xl mx-auto mb-9 leading-relaxed">
+            Detect AI-generated or manipulated images in seconds with confidence scoring and clear visual results.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+            <a href="#detect" className="hero-cta-primary">
+              Detection
+            </a>
+            <a href="#about" className="hero-cta-secondary">
+              Learn More
+            </a>
           </div>
         </div>
       </section>
@@ -413,6 +395,21 @@ function App() {
               </div>
             </div>
           </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+            <div className="rounded-2xl border border-green-300/20 bg-gradient-to-r from-green-900/35 to-black/45 backdrop-blur-sm p-6 shadow-[0_0_18px_rgba(72,255,40,0.12)]">
+              <div className="text-4xl font-bold text-blue-400 mb-2">95%+</div>
+              <div className="text-gray-200 text-2xl/6 md:text-xl">Detection Accuracy</div>
+            </div>
+            <div className="rounded-2xl border border-green-300/20 bg-gradient-to-r from-green-900/35 to-black/45 backdrop-blur-sm p-6 shadow-[0_0_18px_rgba(72,255,40,0.12)]">
+              <div className="text-4xl font-bold text-fuchsia-400 mb-2">&lt;2s</div>
+              <div className="text-gray-200 text-2xl/6 md:text-xl">Processing Time</div>
+            </div>
+            <div className="rounded-2xl border border-green-300/20 bg-gradient-to-r from-green-900/35 to-black/45 backdrop-blur-sm p-6 shadow-[0_0_18px_rgba(72,255,40,0.12)]">
+              <div className="text-4xl font-bold text-green-400 mb-2">24/7</div>
+              <div className="text-gray-200 text-2xl/6 md:text-xl">Available</div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -432,14 +429,14 @@ function App() {
                   onChooseImageClick();
                 }
               }}
-              className="bg-white/5 backdrop-blur-sm rounded-2xl p-8 border border-white/10 border-dashed border-2 hover:border-blue-400 transition-colors upload-area"
+              className="group bg-white/5 backdrop-blur-sm rounded-2xl p-8 border border-white/10 border-dashed border-2 hover:border-emerald-400 hover:shadow-[0_0_28px_rgba(72,255,40,0.2)] transition-all duration-300 upload-area"
             >
               <div className="text-center">
-                <i className="fas fa-cloud-upload-alt text-6xl text-blue-400 mb-4"></i>
+                <i className="fas fa-cloud-upload-alt text-6xl text-emerald-400 mb-4 transition-colors group-hover:text-[#48FF28]"></i>
                 <h4 className="text-2xl font-semibold text-white mb-2">Upload Image for Analysis</h4>
                 <p className="text-gray-400 mb-6">Drag and drop an image here or click to browse</p>
                 <input ref={fileInputRef} onChange={onFileChange} type="file" accept="image/*" className="hidden" />
-                <button onClick={onChooseImageClick} className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all">
+                <button onClick={onChooseImageClick} className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-lg font-semibold hover:from-green-400 hover:to-emerald-500 hover:shadow-[0_0_20px_rgba(72,255,40,0.4)] transition-all">
                   <i className="fas fa-folder-open mr-2"></i>Choose Image
                 </button>
                 <p className="text-gray-500 text-sm mt-4">Supported formats: JPG, PNG (Max 10MB)</p>
@@ -577,7 +574,7 @@ function App() {
                 </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-4 mt-8 justify-center">
-                <button onClick={analyzeImage} className="px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-lg font-semibold hover:from-green-600 hover:to-emerald-700 transition-all">
+                <button onClick={analyzeImage} className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-lg font-semibold hover:from-green-400 hover:to-emerald-500 hover:shadow-[0_0_20px_rgba(72,255,40,0.4)] transition-all">
                   <i className="fas fa-search mr-2"></i>Analyze Image
                 </button>
                 <button onClick={resetDetection} className="px-6 py-3 bg-white/10 backdrop-blur-sm text-white rounded-lg font-semibold hover:bg-white/20 transition-all border border-white/20">
@@ -592,28 +589,28 @@ function App() {
       <section id="features" className="container mx-auto px-6 py-20">
         <h3 className="text-4xl font-bold text-white text-center mb-12">Key Features</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-colors feature-card">
-            <i className="fas fa-eye text-3xl text-blue-400 mb-4"></i>
+          <div className="group bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 transition-all duration-300 feature-card">
+            <i className="fas fa-eye text-3xl text-blue-400 mb-4 transition-colors group-hover:text-[#48FF28]"></i>
             <h4 className="text-xl font-semibold text-white mb-2">Visual Feature Extraction</h4>
             <p className="text-gray-400">Identifies unique patterns and artifacts associated with AI-generated images</p>
           </div>
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-colors feature-card">
-            <i className="fas fa-tachometer-alt text-3xl text-purple-400 mb-4"></i>
+          <div className="group bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 transition-all duration-300 feature-card">
+            <i className="fas fa-tachometer-alt text-3xl text-purple-400 mb-4 transition-colors group-hover:text-[#48FF28]"></i>
             <h4 className="text-xl font-semibold text-white mb-2">Real-time Processing</h4>
             <p className="text-gray-400">Get instant results with our optimized MT-YOLOv6 architecture</p>
           </div>
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-colors feature-card">
-            <i className="fas fa-percentage text-3xl text-green-400 mb-4"></i>
+          <div className="group bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 transition-all duration-300 feature-card">
+            <i className="fas fa-percentage text-3xl text-green-400 mb-4 transition-colors group-hover:text-[#48FF28]"></i>
             <h4 className="text-xl font-semibold text-white mb-2">Confidence Scoring</h4>
             <p className="text-gray-400">Detailed confidence levels and credibility metrics for each analysis</p>
           </div>
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-colors feature-card">
-            <i className="fas fa-map-marked-alt text-3xl text-yellow-400 mb-4"></i>
+          <div className="group bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 transition-all duration-300 feature-card">
+            <i className="fas fa-map-marked-alt text-3xl text-yellow-400 mb-4 transition-colors group-hover:text-[#48FF28]"></i>
             <h4 className="text-xl font-semibold text-white mb-2">Visual Annotations</h4>
             <p className="text-gray-400">Highlighted regions showing detected anomalies and AI patterns</p>
           </div>
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 hover:bg-white/10 transition-colors feature-card">
-            <i className="fas fa-lock text-3xl text-indigo-400 mb-4"></i>
+          <div className="group bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 transition-all duration-300 feature-card">
+            <i className="fas fa-lock text-3xl text-indigo-400 mb-4 transition-colors group-hover:text-[#48FF28]"></i>
             <h4 className="text-xl font-semibold text-white mb-2">Privacy First</h4>
             <p className="text-gray-400">Local processing ensures your images remain private and secure</p>
           </div>
@@ -625,10 +622,10 @@ function App() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div>
               <div className="flex items-center space-x-3 mb-4">
-                <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                  <i className="fas fa-shield-alt text-white"></i>
+                <div className="w-9 h-9 hero-logo-badge rounded-full flex items-center justify-center">
+                  <i className="fas fa-shield-alt text-white text-sm"></i>
                 </div>
-                <h4 className="text-xl font-bold text-white">VerifAI</h4>
+                <h4 className="text-xl font-semibold tracking-wide text-white">VerifAI</h4>
               </div>
               <p className="text-gray-400">AI Image Detection System powered by MT-YOLOv6</p>
             </div>
