@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import TrueFocus from './components/TrueFocus.jsx';
 import LightPillar from './components/LightPillar.jsx';
 
@@ -29,8 +29,9 @@ function App() {
   const uploadAreaRef = useRef(null);
   const imageOverlayRef = useRef(null);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [currentImage, setCurrentImage] = useState(null);
-  const [currentFile, setCurrentFile] = useState(null);
+  const [imagePreviews, setImagePreviews] = useState([]);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [results, setResults] = useState(null);
   const [notifications, setNotifications] = useState([]);
@@ -48,28 +49,59 @@ function App() {
   }
 
   function onFileChange(e) {
-    const file = e.target.files?.[0];
-    if (file) handleFile(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) handleFiles(files);
   }
 
-  function handleFile(file) {
-    if (!file.type.startsWith('image/')) {
-      pushNotification('Please upload an image file', 'error');
+  function readAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleFiles(files) {
+    const validFiles = [];
+    let invalidTypeCount = 0;
+    let invalidSizeCount = 0;
+
+    files.forEach((file) => {
+      if (!file.type.startsWith('image/')) {
+        invalidTypeCount += 1;
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        invalidSizeCount += 1;
+        return;
+      }
+      validFiles.push(file);
+    });
+
+    if (invalidTypeCount > 0) {
+      pushNotification(`${invalidTypeCount} file(s) skipped: not an image`, 'warning');
+    }
+    if (invalidSizeCount > 0) {
+      pushNotification(`${invalidSizeCount} file(s) skipped: larger than 10MB`, 'warning');
+    }
+
+    if (validFiles.length === 0) {
+      pushNotification('Please upload at least one valid image file', 'error');
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      pushNotification('File size must be less than 10MB', 'error');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setCurrentImage(e.target.result);
-      setCurrentFile(file);
+
+    try {
+      const previews = await Promise.all(validFiles.map((file) => readAsDataURL(file)));
+      setImagePreviews(previews);
+      setSelectedFiles(validFiles);
+      setActiveImageIndex(0);
       setResults(null);
       if (imageOverlayRef.current) imageOverlayRef.current.innerHTML = '';
-      pushNotification('Image uploaded successfully. Click "Analyze Image" to start detection.', 'success');
-    };
-    reader.readAsDataURL(file);
+      pushNotification(`${validFiles.length} image(s) uploaded successfully. Click "Analyze Images" to start detection.`, 'success');
+    } catch (error) {
+      pushNotification(error.message || 'Failed to prepare image previews', 'error');
+    }
   }
 
   function renderDetections(detections, dimensions) {
@@ -124,13 +156,28 @@ function App() {
     if (uploadEl) uploadEl.classList.remove('dragover');
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
-      handleFile(files[0]);
+      handleFiles(Array.from(files));
     }
   }
 
+  useEffect(() => {
+    if (!results || results.loading) {
+      if (imageOverlayRef.current) imageOverlayRef.current.innerHTML = '';
+      return;
+    }
+
+    const activeResult = results.items?.[activeImageIndex];
+    if (!activeResult) {
+      if (imageOverlayRef.current) imageOverlayRef.current.innerHTML = '';
+      return;
+    }
+
+    renderDetections(activeResult.detections, activeResult.dimensions);
+  }, [results, activeImageIndex]);
+
   async function analyzeImage() {
-    if (!currentImage || !currentFile) {
-      pushNotification('Please upload an image first', 'warning');
+    if (selectedFiles.length === 0 || imagePreviews.length === 0) {
+      pushNotification('Please upload image(s) first', 'warning');
       return;
     }
     if (isAnalyzing) {
@@ -153,7 +200,9 @@ function App() {
 
     try {
       const formData = new FormData();
-      formData.append('file', currentFile);
+      selectedFiles.forEach((file) => {
+        formData.append('files', file);
+      });
 
       const response = await fetch(`${API_BASE_URL}/api/v1/analyze`, {
         method: 'POST',
@@ -167,22 +216,29 @@ function App() {
 
       clearInterval(interval);
 
-      const detections = Array.isArray(payload.detections) ? payload.detections : [];
-      const maxConfidence = detections.length > 0
-        ? Math.max(...detections.map((d) => (d.confidence || 0) * 100))
-        : 0;
+      const normalizedResults = Array.isArray(payload.results) ? payload.results : [payload];
+      const resultsWithConfidence = normalizedResults.map((item) => {
+        const detections = Array.isArray(item.detections) ? item.detections : [];
+        const confidence = detections.length > 0
+          ? Math.max(...detections.map((d) => (d.confidence || 0) * 100))
+          : 0;
 
-      renderDetections(detections, payload.dimensions);
+        return {
+          ...item,
+          detections,
+          confidence,
+        };
+      });
 
       setResults({
         loading: false,
-        analysis: payload.analysis,
-        detections,
-        confidence: maxConfidence,
-        dimensions: payload.dimensions,
-        filename: payload.filename,
-        modelPath: payload.model_path,
+        items: resultsWithConfidence,
       });
+
+      const firstSuspiciousIndex = resultsWithConfidence.findIndex(
+        (item) => item.analysis?.status !== 'Likely Real'
+      );
+      setActiveImageIndex(firstSuspiciousIndex >= 0 ? firstSuspiciousIndex : 0);
 
       setIsAnalyzing(false);
       pushNotification('Analysis complete! Check the results below.', 'success');
@@ -195,8 +251,9 @@ function App() {
   }
 
   function resetDetection() {
-    setCurrentImage(null);
-    setCurrentFile(null);
+    setImagePreviews([]);
+    setSelectedFiles([]);
+    setActiveImageIndex(0);
     setIsAnalyzing(false);
     setResults(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -417,7 +474,7 @@ function App() {
         <div className="max-w-4xl mx-auto">
           <h3 className="text-4xl font-bold text-white text-center mb-12">Image Detection</h3>
 
-          {!currentImage && (
+          {imagePreviews.length === 0 && (
             <div
               id="uploadArea"
               ref={uploadAreaRef}
@@ -433,25 +490,39 @@ function App() {
             >
               <div className="text-center">
                 <i className="fas fa-cloud-upload-alt text-6xl text-emerald-400 mb-4 transition-colors group-hover:text-[#48FF28]"></i>
-                <h4 className="text-2xl font-semibold text-white mb-2">Upload Image for Analysis</h4>
-                <p className="text-gray-400 mb-6">Drag and drop an image here or click to browse</p>
-                <input ref={fileInputRef} onChange={onFileChange} type="file" accept="image/*" className="hidden" />
+                <h4 className="text-2xl font-semibold text-white mb-2">Upload Images for Analysis</h4>
+                <p className="text-gray-400 mb-6">Drag and drop image(s) here or click to browse</p>
+                <input ref={fileInputRef} onChange={onFileChange} type="file" accept="image/*" multiple className="hidden" />
                 <button onClick={onChooseImageClick} className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-lg font-semibold hover:from-green-400 hover:to-emerald-500 hover:shadow-[0_0_20px_rgba(72,255,40,0.4)] transition-all">
-                  <i className="fas fa-folder-open mr-2"></i>Choose Image
+                  <i className="fas fa-folder-open mr-2"></i>Choose Images
                 </button>
                 <p className="text-gray-500 text-sm mt-4">Supported formats: JPG, PNG (Max 10MB)</p>
               </div>
             </div>
           )}
 
-          {currentImage && (
+          {imagePreviews.length > 0 && (
             <div id="previewArea" className="bg-white/5 backdrop-blur-sm rounded-2xl p-6 border border-white/10 animate-fade-in">
               <div className="mb-6">
-                <h4 className="text-xl font-semibold text-white mb-4">Original Image</h4>
+                <h4 className="text-xl font-semibold text-white mb-4">Selected Image ({activeImageIndex + 1}/{imagePreviews.length})</h4>
                 <div className="relative max-w-2xl mx-auto">
-                  <img src={currentImage} alt="Original" className="w-full rounded-lg max-h-96 object-contain" />
+                  <img src={imagePreviews[activeImageIndex]} alt="Selected" className="w-full rounded-lg max-h-96 object-contain" />
                   <div ref={imageOverlayRef} className="absolute inset-0 pointer-events-none"></div>
                 </div>
+                {imagePreviews.length > 1 && (
+                  <div className="mt-4 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                    {imagePreviews.map((preview, index) => (
+                      <button
+                        key={`preview-${index}`}
+                        onClick={() => setActiveImageIndex(index)}
+                        className={`rounded-md overflow-hidden border-2 transition-all ${activeImageIndex === index ? 'border-emerald-400' : 'border-white/20 hover:border-white/50'}`}
+                        aria-label={`View image ${index + 1}`}
+                      >
+                        <img src={preview} alt={`Preview ${index + 1}`} className="w-full h-16 object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <h4 className="text-xl font-semibold text-white mb-4">Analysis Results</h4>
@@ -466,75 +537,106 @@ function App() {
                       </div>
                     </div>
                   )}
-                  {!results?.loading && results && (
+                  {!results?.loading && results && (() => {
+                    const activeResult = results.items?.[activeImageIndex];
+                    if (!activeResult) return null;
+
+                    return (
                     <>
+                      {results.items.length > 1 && (
+                        <div className="result-card md:col-span-2">
+                          <h5 className="text-base font-semibold text-white mb-3">Batch Summary (Analyzed Individually)</h5>
+                          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                            {results.items.map((item, index) => (
+                              <button
+                                key={`${item.filename}-${index}`}
+                                onClick={() => setActiveImageIndex(index)}
+                                className={`w-full text-left rounded-lg border px-3 py-2 transition-all ${activeImageIndex === index ? 'border-emerald-400 bg-emerald-500/10' : 'border-white/15 bg-white/5 hover:border-white/40'}`}
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="text-sm text-white font-medium truncate max-w-[55%]">{item.filename}</span>
+                                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusClasses(item.analysis.status)}`}>
+                                    {item.analysis.status}
+                                  </span>
+                                </div>
+                                <div className="mt-1 text-xs text-gray-300 flex flex-wrap gap-3">
+                                  <span>Credibility: {item.analysis.score}/100</span>
+                                  <span>Detections: {item.detections.length}</span>
+                                  <span>Image {index + 1} of {results.items.length}</span>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="result-card md:col-span-2">
                         <div className="flex items-center justify-between mb-3">
                           <h5 className="text-lg font-semibold text-white">Detection Result</h5>
-                          <span className={`px-3 py-1 rounded-full text-sm font-semibold ${getStatusClasses(results.analysis.status)}`}>
-                            {results.analysis.status}
+                          <span className={`px-3 py-1 rounded-full text-sm font-semibold ${getStatusClasses(activeResult.analysis.status)}`}>
+                            {activeResult.analysis.status}
                           </span>
                         </div>
                         <p className="text-gray-300 text-sm">
-                          {getStatusMessage(results.analysis.status)}
+                          {getStatusMessage(activeResult.analysis.status)}
                         </p>
                         <p className="text-gray-500 text-xs mt-3">
-                          File: {results.filename} | Model: {results.modelPath}
+                          File: {activeResult.filename} ({activeImageIndex + 1}/{results.items.length}) | Model: {activeResult.model_path}
                         </p>
                       </div>
                       <div className="result-card">
                         <h5 className="text-base font-semibold text-white mb-2">Confidence</h5>
-                        <div className="text-2xl font-bold text-white mb-2">{results.confidence.toFixed(1)}%</div>
+                        <div className="text-2xl font-bold text-white mb-2">{activeResult.confidence.toFixed(1)}%</div>
                         <div className="confidence-bar">
-                          <div className={`confidence-fill ${getConfidenceClass(results.confidence)}`} style={{ width: `${results.confidence}%` }}></div>
+                          <div className={`confidence-fill ${getConfidenceClass(activeResult.confidence)}`} style={{ width: `${activeResult.confidence}%` }}></div>
                         </div>
-                        <p className="text-gray-400 text-xs mt-2">{getConfidenceDescription(results.confidence)}</p>
+                        <p className="text-gray-400 text-xs mt-2">{getConfidenceDescription(activeResult.confidence)}</p>
                       </div>
                       <div className="result-card">
                         <h5 className="text-base font-semibold text-white mb-2">Credibility</h5>
                         {(() => {
-                          const credibilityClasses = getCredibilityClasses(results.analysis.score);
+                          const credibilityClasses = getCredibilityClasses(activeResult.analysis.score);
                           return (
                         <div className="flex items-center gap-2 mb-2">
                           <i className={`fas fa-shield-alt ${credibilityClasses.icon}`}></i>
-                          <span className="text-2xl font-bold text-white">{results.analysis.score.toFixed(0)}/100</span>
+                          <span className="text-2xl font-bold text-white">{activeResult.analysis.score.toFixed(0)}/100</span>
                         </div>
                           );
                         })()}
                         <div className="w-full bg-gray-700 rounded-full h-2">
                           {(() => {
-                            const credibilityClasses = getCredibilityClasses(results.analysis.score);
-                            return <div className={`bg-gradient-to-r ${credibilityClasses.bar} h-2 rounded-full`} style={{ width: `${results.analysis.score}%` }}></div>;
+                            const credibilityClasses = getCredibilityClasses(activeResult.analysis.score);
+                            return <div className={`bg-gradient-to-r ${credibilityClasses.bar} h-2 rounded-full`} style={{ width: `${activeResult.analysis.score}%` }}></div>;
                           })()}
                         </div>
-                        <p className="text-gray-400 text-xs mt-2">{getCredibilityLabel(results.analysis.score)}</p>
+                        <p className="text-gray-400 text-xs mt-2">{getCredibilityLabel(activeResult.analysis.score)}</p>
                       </div>
                       <div className="result-card">
                         <h5 className="text-base font-semibold text-white mb-3">Analysis Details</h5>
                         <div className="space-y-2 text-sm">
                           <div className="flex justify-between">
                             <span className="text-gray-400">Detections</span>
-                            <span className={results.detections.length > 0 ? 'text-red-400' : 'text-green-400'}>{results.detections.length}</span>
+                            <span className={activeResult.detections.length > 0 ? 'text-red-400' : 'text-green-400'}>{activeResult.detections.length}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-400">Anomalies</span>
-                            <span className={results.analysis.anomalies_found > 0 ? 'text-orange-400' : 'text-green-400'}>{results.analysis.anomalies_found}</span>
+                            <span className={activeResult.analysis.anomalies_found > 0 ? 'text-orange-400' : 'text-green-400'}>{activeResult.analysis.anomalies_found}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-400">Patterns</span>
-                            <span className={getDetailClass('Patterns', results.analysis.status)}>{results.analysis.status === 'Likely Real' ? 'Normal' : 'Irregular'}</span>
+                            <span className={getDetailClass('Patterns', activeResult.analysis.status)}>{activeResult.analysis.status === 'Likely Real' ? 'Normal' : 'Irregular'}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-400">Resolution</span>
-                            <span className="text-blue-300">{results.dimensions?.[0]} x {results.dimensions?.[1]}</span>
+                            <span className="text-blue-300">{activeResult.dimensions?.[0]} x {activeResult.dimensions?.[1]}</span>
                           </div>
                         </div>
                       </div>
-                      {results.detections.length > 0 && (
+                      {activeResult.detections.length > 0 && (
                         <div className="result-card md:col-span-2">
                           <h5 className="text-base font-semibold text-white mb-3">Detected Regions</h5>
                           <div className="space-y-2 text-sm max-h-48 overflow-y-auto pr-2">
-                            {results.detections.map((detection, index) => (
+                            {activeResult.detections.map((detection, index) => (
                               <div key={`${detection.class_name}-${index}`} className="flex items-center justify-between border-b border-white/10 pb-1">
                                 <span className="text-gray-300">{detection.class_name}</span>
                                 <span className="text-red-300">{(detection.confidence * 100).toFixed(1)}%</span>
@@ -548,13 +650,13 @@ function App() {
                           <i className="fas fa-info-circle text-blue-400 mr-2"></i>Recommendations
                         </h5>
                         <ul className="space-y-1 text-gray-300 text-sm">
-                          {results.analysis.status === 'Likely Real' ? (
+                          {activeResult.analysis.status === 'Likely Real' ? (
                             <>
                               <li>• Image appears authentic</li>
                               <li>• Still verify source when possible</li>
                               <li>• Can be shared with confidence</li>
                             </>
-                          ) : results.analysis.status === 'Suspicious' ? (
+                          ) : activeResult.analysis.status === 'Suspicious' ? (
                             <>
                               <li>• Review highlighted regions carefully</li>
                               <li>• Compare with original source if available</li>
@@ -570,15 +672,16 @@ function App() {
                         </ul>
                       </div>
                     </>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-4 mt-8 justify-center">
                 <button onClick={analyzeImage} className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-lg font-semibold hover:from-green-400 hover:to-emerald-500 hover:shadow-[0_0_20px_rgba(72,255,40,0.4)] transition-all">
-                  <i className="fas fa-search mr-2"></i>Analyze Image
+                  <i className="fas fa-search mr-2"></i>Analyze Images
                 </button>
                 <button onClick={resetDetection} className="px-6 py-3 bg-white/10 backdrop-blur-sm text-white rounded-lg font-semibold hover:bg-white/20 transition-all border border-white/20">
-                  <i className="fas fa-redo mr-2"></i>Upload New Image
+                  <i className="fas fa-redo mr-2"></i>Upload New Images
                 </button>
               </div>
             </div>

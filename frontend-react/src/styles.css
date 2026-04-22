@@ -93,17 +93,18 @@
 }
 
 .result-card {
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+    background: linear-gradient(180deg, rgba(5, 18, 8, 0.78), rgba(3, 12, 6, 0.58));
     backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(159, 255, 171, 0.35);
     border-radius: 12px;
     padding: 20px;
     transition: all 0.3s ease;
+    box-shadow: 0 0 0 1px rgba(130, 250, 146, 0.1) inset, 0 12px 40px rgba(0, 0, 0, 0.45);
 }
 
 .result-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 10px 30px rgba(59, 130, 246, 0.2);
+    box-shadow: 0 0 0 1px rgba(130, 250, 146, 0.18) inset, 0 14px 42px rgba(0, 0, 0, 0.5);
 }
 
 .progress-bar {

@@ -1,6 +1,7 @@
 import io
 import os
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -71,30 +72,58 @@ def calculate_credibility(detections: list) -> dict:
         "anomalies_found": len(detections)
     }
 
+async def analyze_uploaded_file(file: UploadFile) -> dict:
+    content_type = file.content_type or ""
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail=f"Invalid file type for {file.filename}.")
+
+    image_bytes = await file.read()
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+    # 1. Run YOLO Inference
+    detections = detector.predict(image)
+
+    # 2. Calculate Credibility Score
+    credibility_report = calculate_credibility(detections)
+
+    # 3. Format Response for the Frontend
+    return {
+        "filename": file.filename,
+        "dimensions": image.size,
+        "analysis": credibility_report,
+        "detections": detections,  # Array of bounding boxes to draw on the UI
+        "model_path": MODEL_PATH,
+        "message": "Analysis complete."
+    }
+
+
 @app.post("/api/v1/analyze")
-async def analyze_image(file: UploadFile = File(...)):
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Invalid file type.")
+async def analyze_image(
+    files: list[UploadFile] = File(default=[]),
+    file: Optional[UploadFile] = File(default=None)
+):
+    uploaded_files: list[UploadFile] = []
+    if files:
+        uploaded_files.extend(files)
+    if file is not None:
+        uploaded_files.append(file)
+
+    if not uploaded_files:
+        raise HTTPException(status_code=400, detail="No files provided.")
 
     try:
-        image_bytes = await file.read()
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        results = [await analyze_uploaded_file(uploaded_file) for uploaded_file in uploaded_files]
 
-        # 1. Run YOLO Inference
-        detections = detector.predict(image)
+        if len(results) == 1:
+            return results[0]
 
-        # 2. Calculate Credibility Score
-        credibility_report = calculate_credibility(detections)
-
-        # 3. Format Response for the Frontend
         return {
-            "filename": file.filename,
-            "dimensions": image.size,
-            "analysis": credibility_report,
-            "detections": detections, # Array of bounding boxes to draw on the UI
+            "count": len(results),
+            "results": results,
             "model_path": MODEL_PATH,
-            "message": "Analysis complete."
+            "message": "Batch analysis complete."
         }
-
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
