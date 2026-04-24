@@ -1,777 +1,2127 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import TrueFocus from './components/TrueFocus.jsx';
-import LightPillar from './components/LightPillar.jsx';
+import { Shield, Zap, CheckCircle, BrainCircuit, BarChart3, Gauge, Lock, ScanSearch, MapPinned, Plus, History, Link2, ChevronDown, Plane, ImagePlus, Images, Search, BarChart2, PieChart, Activity, Sparkles } from 'lucide-react';
+import Orb from './components/Orb';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+const terminals = [
+  {
+    id: 'model-init',
+    lines: [
+      '$ verifai init --model yolov8',
+      '[INFO] Loading YOLOv8 weights...',
+      '[SUCCESS] Model initialized',
+      '[INFO] GPU acceleration enabled',
+      '[READY] Waiting for input',
+    ],
+  },
+  {
+    id: 'image-analysis',
+    lines: [
+      '$ verifai analyze input.jpg',
+      '[SCAN] Analyzing image features...',
+      '[DETECT] Neural artifacts found',
+      '[SCORE] Confidence: 94.7%',
+      '[RESULT] AI-generated: TRUE',
+    ],
+  },
+  {
+    id: 'batch-process',
+    lines: [
+      '$ verifai batch --dir ./images',
+      '[INFO] Found 247 images',
+      '[PROGRESS] Processing... 45/247',
+      '[STATS] Real: 132 | AI: 115',
+      '[TIME] Avg: 0.32s per image',
+    ],
+  },
+  {
+    id: 'api-server',
+    lines: [
+      '$ verifai serve --port 8080',
+      '[SERVER] Starting API server...',
+      '[LIVE] https://api.verifai.dev',
+      '[HEALTH] All systems operational',
+      '[REQUESTS] 1.2M/day processed',
+    ],
+  },
+  {
+    id: 'training-log',
+    lines: [
+      '$ verifai train --epochs 100',
+      '[EPOCH 98/100] Loss: 0.0234',
+      '[VAL] Accuracy: 96.8%',
+      '[CHECKPOINT] Model saved',
+      '[DONE] Training complete',
+    ],
+  },
+  {
+    id: 'detection-real',
+    lines: [
+      '$ verifai detect photo_2024.png',
+      '[ANALYZING] Compression artifacts',
+      '[CHECK] EXIF metadata intact',
+      '[SCAN] No AI signatures found',
+      '[RESULT] Real image: 98.2%',
+    ],
+  },
+  {
+    id: 'security-scan',
+    lines: [
+      '$ verifai audit --deep-scan',
+      '[FORENSIC] Pixel-level analysis',
+      '[DETECT] Diffusion patterns found',
+      '[TRACE] Generated via Stable Diff.',
+      '[CONFIDENCE] 99.1% AI-made',
+    ],
+  },
+  {
+    id: 'performance',
+    lines: [
+      '$ verifai benchmark --gpu',
+      '[TEST] Processing 1000 images...',
+      '[SPEED] 312 images/second',
+      '[MEMORY] 2.4GB VRAM used',
+      '[SCORE] Performance: Excellent',
+    ],
+  },
+];
 
-function Notification({ message, type }) {
-  const icon = useMemo(() => {
-    switch (type) {
-      case 'success': return 'check-circle';
-      case 'error': return 'exclamation-circle';
-      case 'warning': return 'exclamation-triangle';
-      case 'info':
-      default: return 'info-circle';
-    }
-  }, [type]);
-  return (
-    <div className={`notification ${type}`}>
-      <div className="flex items-center">
-        <i className={`fas fa-${icon} mr-3`}></i>
-        <span>{message}</span>
-      </div>
-    </div>
-  );
+const heroAnimationDelays = [0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+
+const aboutCards = [
+  {
+    id: 'ai-tech',
+    icon: BrainCircuit,
+    title: 'Advanced AI Technology',
+    subtitle: 'Powered by MT-YOLOv6 for real-time detection',
+    body: 'VerifAI is a cutting-edge Machine Learning-based AI Image Detection System designed to combat the growing threat of AI-generated misinformation.',
+    points: ['Real-time inference pipeline', 'Architecture tuned for detection quality', 'Production-grade model serving'],
+    cta: 'Learn the Model',
+  },
+  {
+    id: 'credibility',
+    icon: BarChart3,
+    title: 'Credibility Scoring',
+    subtitle: 'Quantitative reliability assessment',
+    body: 'The system integrates sophisticated credibility scoring mechanisms to provide users with comprehensive insights about image reliability.',
+    points: ['Confidence score breakdown', 'Risk-weighted interpretation', 'Actionable verification hints'],
+    cta: 'View Scoring',
+  },
+  {
+    id: 'realtime',
+    icon: Gauge,
+    title: 'Real-time Processing',
+    subtitle: 'Instant analysis and results',
+    body: 'Using the advanced MT-YOLOv6 architecture, our system analyzes visual content to determine authenticity with remarkable accuracy.',
+    points: ['Fast queue execution', 'Low-latency result delivery', 'Batch and single-image modes'],
+    cta: 'Try Processing',
+  },
+  {
+    id: 'privacy',
+    icon: Lock,
+    title: 'Privacy Protection',
+    subtitle: 'Secure image processing',
+    body: 'VerifAI helps create a safer digital environment by processing visual evidence with strong privacy-first safeguards.',
+    points: ['Secure upload handling', 'Controlled access workflow', 'Safety-focused data flow'],
+    cta: 'Read Privacy',
+  },
+  {
+    id: 'visual-features',
+    icon: ScanSearch,
+    title: 'Visual Feature Extraction',
+    subtitle: 'AI artifact and pattern analysis',
+    body: 'Identifies unique patterns and anomalies associated with generated and manipulated visual media.',
+    points: ['Artifact localization', 'Signal consistency checks', 'Deep feature comparison'],
+    cta: 'Explore Detection',
+  },
+  {
+    id: 'annotations',
+    icon: MapPinned,
+    title: 'Visual Annotations',
+    subtitle: 'Highlighted suspicious regions',
+    body: 'Detected anomalies and AI signatures are surfaced in clear overlays to support fast human review.',
+    points: ['Focused region highlights', 'Review-friendly overlays', 'Clear audit trail context'],
+    cta: 'See Annotations',
+  },
+];
+
+function classifyLine(line) {
+  if (line.startsWith('$')) return 'prompt';
+  if (line.includes('[SUCCESS]') || line.includes('[DONE]') || line.includes('[READY]')) return 'success';
+  if (line.includes('[WARN]') || line.includes('[TIME]') || line.includes('[SCORE]')) return 'warn';
+  if (line.includes('[ERROR]')) return 'error';
+  return 'default';
 }
 
 function App() {
-  const fileInputRef = useRef(null);
-  const uploadAreaRef = useRef(null);
-  const imageOverlayRef = useRef(null);
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [imagePreviews, setImagePreviews] = useState([]);
-  const [selectedFiles, setSelectedFiles] = useState([]);
-  const [activeImageIndex, setActiveImageIndex] = useState(0);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [results, setResults] = useState(null);
-  const [notifications, setNotifications] = useState([]);
-
-  function pushNotification(message, type = 'info') {
-    const id = Date.now() + Math.random();
-    setNotifications((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setNotifications((prev) => prev.filter((n) => n.id !== id));
-    }, 5000);
-  }
-
-  function onChooseImageClick() {
-    fileInputRef.current?.click();
-  }
-
-  function onFileChange(e) {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) handleFiles(files);
-  }
-
-  function readAsDataURL(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve(e.target.result);
-      reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
-      reader.readAsDataURL(file);
-    });
-  }
-
-  async function handleFiles(files) {
-    const validFiles = [];
-    let invalidTypeCount = 0;
-    let invalidSizeCount = 0;
-
-    files.forEach((file) => {
-      if (!file.type.startsWith('image/')) {
-        invalidTypeCount += 1;
-        return;
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        invalidSizeCount += 1;
-        return;
-      }
-      validFiles.push(file);
-    });
-
-    if (invalidTypeCount > 0) {
-      pushNotification(`${invalidTypeCount} file(s) skipped: not an image`, 'warning');
-    }
-    if (invalidSizeCount > 0) {
-      pushNotification(`${invalidSizeCount} file(s) skipped: larger than 10MB`, 'warning');
-    }
-
-    if (validFiles.length === 0) {
-      pushNotification('Please upload at least one valid image file', 'error');
-      return;
-    }
-
-    try {
-      const previews = await Promise.all(validFiles.map((file) => readAsDataURL(file)));
-      setImagePreviews(previews);
-      setSelectedFiles(validFiles);
-      setActiveImageIndex(0);
-      setResults(null);
-      if (imageOverlayRef.current) imageOverlayRef.current.innerHTML = '';
-      pushNotification(`${validFiles.length} image(s) uploaded successfully. Click "Analyze Images" to start detection.`, 'success');
-    } catch (error) {
-      pushNotification(error.message || 'Failed to prepare image previews', 'error');
-    }
-  }
-
-  function renderDetections(detections, dimensions) {
-    if (!imageOverlayRef.current) return;
-    imageOverlayRef.current.innerHTML = '';
-
-    if (!Array.isArray(detections) || detections.length === 0) return;
-
-    const [imageWidth, imageHeight] = Array.isArray(dimensions) ? dimensions : [1, 1];
-    if (!imageWidth || !imageHeight) return;
-
-    detections.forEach((detection, index) => {
-      const boxData = detection?.box;
-      if (!boxData) return;
-
-      const boxWidth = Math.max(0, boxData.xmax - boxData.xmin);
-      const boxHeight = Math.max(0, boxData.ymax - boxData.ymin);
-
-      const box = document.createElement('div');
-      box.className = 'detection-box';
-      box.style.left = `${(boxData.xmin / imageWidth) * 100}%`;
-      box.style.top = `${(boxData.ymin / imageHeight) * 100}%`;
-      box.style.width = `${(boxWidth / imageWidth) * 100}%`;
-      box.style.height = `${(boxHeight / imageHeight) * 100}%`;
-      box.style.opacity = '0';
-
-      const label = document.createElement('div');
-      label.className = 'detection-label';
-      label.textContent = `${detection.class_name || 'object'} ${(detection.confidence * 100).toFixed(1)}%`;
-      box.appendChild(label);
-
-      imageOverlayRef.current.appendChild(box);
-      setTimeout(() => {
-        box.style.opacity = '1';
-        box.style.animation = 'fadeIn 0.4s ease-out';
-      }, index * 120);
-    });
-  }
-
-  function onDragOver(e) {
-    e.preventDefault();
-    const uploadEl = uploadAreaRef.current;
-    if (uploadEl) uploadEl.classList.add('dragover');
-  }
-  function onDragLeave() {
-    const uploadEl = uploadAreaRef.current;
-    if (uploadEl) uploadEl.classList.remove('dragover');
-  }
-  function onDrop(e) {
-    e.preventDefault();
-    const uploadEl = uploadAreaRef.current;
-    if (uploadEl) uploadEl.classList.remove('dragover');
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) {
-      handleFiles(Array.from(files));
-    }
-  }
+  const [currentView, setCurrentView] = useState(() => {
+    if (typeof window === 'undefined') return null;
+    if (window.location.hash === '#app') return 'app';
+    if (window.location.hash === '#signup') return 'signup';
+    if (window.location.hash === '#login') return 'login';
+    return null;
+  });
+  const [scanMode, setScanMode] = useState('single');
+  const [selectedImages, setSelectedImages] = useState([]);
+  const [hasScanned, setHasScanned] = useState(false);
+  const [showDetectFlow, setShowDetectFlow] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const accountMenuRef = useRef(null);
+  const modeMenuRef = useRef(null);
 
   useEffect(() => {
-    if (!results || results.loading) {
-      if (imageOverlayRef.current) imageOverlayRef.current.innerHTML = '';
-      return;
-    }
+    const handleMouseMove = (event) => {
+      document.documentElement.style.setProperty('--mouse-x', `${event.clientX}px`);
+      document.documentElement.style.setProperty('--mouse-y', `${event.clientY}px`);
+    };
 
-    const activeResult = results.items?.[activeImageIndex];
-    if (!activeResult) {
-      if (imageOverlayRef.current) imageOverlayRef.current.innerHTML = '';
-      return;
-    }
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
 
-    renderDetections(activeResult.detections, activeResult.dimensions);
-  }, [results, activeImageIndex]);
+  useEffect(() => {
+    const syncRouteState = () => {
+      if (window.location.hash === '#app') {
+        setCurrentView('app');
+        return;
+      }
+      if (window.location.hash === '#signup') {
+        setCurrentView('signup');
+        return;
+      }
+      if (window.location.hash === '#login') {
+        setCurrentView('login');
+        return;
+      }
+      setCurrentView(null);
+    };
 
-  async function analyzeImage() {
-    if (selectedFiles.length === 0 || imagePreviews.length === 0) {
-      pushNotification('Please upload image(s) first', 'warning');
-      return;
-    }
-    if (isAnalyzing) {
-      pushNotification('Analysis already in progress...', 'info');
-      return;
-    }
-    setIsAnalyzing(true);
-    setResults({
-      loading: true,
-      progress: 0
-    });
+    syncRouteState();
+    window.addEventListener('hashchange', syncRouteState);
+    return () => window.removeEventListener('hashchange', syncRouteState);
+  }, []);
 
-    if (imageOverlayRef.current) imageOverlayRef.current.innerHTML = '';
+  useEffect(() => {
+    const handlePointerDown = (event) => {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(event.target)) {
+        setAccountMenuOpen(false);
+      }
+      if (modeMenuRef.current && !modeMenuRef.current.contains(event.target)) {
+        setModeMenuOpen(false);
+      }
+    };
 
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress = Math.min(92, progress + Math.random() * 14);
-      setResults((r) => r && r.loading ? { ...r, progress } : r);
-    }, 500);
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, []);
 
-    try {
-      const formData = new FormData();
-      selectedFiles.forEach((file) => {
-        formData.append('files', file);
-      });
+  const goToLoginPage = (event) => {
+    event.preventDefault();
+    window.location.hash = 'login';
+  };
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/analyze`, {
-        method: 'POST',
-        body: formData
-      });
+  const goToSignupPage = (event) => {
+    event.preventDefault();
+    window.location.hash = 'signup';
+  };
 
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload?.detail || 'Failed to analyze image.');
+  const goToAppPage = () => {
+    setShowDetectFlow(false);
+    setSelectedImages([]);
+    setHasScanned(false);
+    setAccountMenuOpen(false);
+    setModeMenuOpen(false);
+    window.location.hash = 'app';
+  };
+
+  const closeAuthPage = () => {
+    window.location.hash = 'home';
+  };
+
+  const toggleAccountMenu = () => {
+    setAccountMenuOpen((value) => !value);
+  };
+
+  const toggleModeMenu = () => {
+    setModeMenuOpen((value) => !value);
+  };
+
+  const selectScanMode = (mode) => {
+    setScanMode(mode);
+    setSelectedImages([]);
+    setHasScanned(false);
+    setModeMenuOpen(false);
+  };
+
+  const signOut = () => {
+    setAccountMenuOpen(false);
+    window.location.hash = 'home';
+  };
+
+  const onUploadImages = (event) => {
+    const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith('image/'));
+    if (files.length === 0) return;
+
+    const limited = scanMode === 'single' ? [files[0]] : files.slice(0, 8);
+    const previewItems = limited.map((file) => ({
+      name: file.name,
+      preview: URL.createObjectURL(file),
+    }));
+
+    setSelectedImages(previewItems);
+    setHasScanned(false);
+  };
+
+  const runScan = () => {
+    if (selectedImages.length === 0) return;
+    setHasScanned(true);
+  };
+
+  const embeddedStyles = useMemo(
+    () => `
+      :root {
+        --primary: #ff6b00;
+        --bg: #000000;
+        --text: #ffffff;
+        --muted: rgba(255, 255, 255, 0.72);
+        --muted-dim: rgba(255, 255, 255, 0.5);
+        --success: #27c93f;
+        --warn: #ffbd2e;
+        --error: #ff5f56;
+        --terminal-bg: #0a0a0a;
       }
 
-      clearInterval(interval);
+      * {
+        box-sizing: border-box;
+      }
 
-      const normalizedResults = Array.isArray(payload.results) ? payload.results : [payload];
-      const resultsWithConfidence = normalizedResults.map((item) => {
-        const detections = Array.isArray(item.detections) ? item.detections : [];
-        const confidence = detections.length > 0
-          ? Math.max(...detections.map((d) => (d.confidence || 0) * 100))
-          : 0;
+      html,
+      body,
+      #root {
+        margin: 0;
+        min-height: 100%;
+        background: var(--bg);
+      }
 
-        return {
-          ...item,
-          detections,
-          confidence,
-        };
-      });
+      .page {
+        position: relative;
+        min-height: 100vh;
+        overflow-x: hidden;
+        font-family: Inter, 'Segoe UI', sans-serif;
+        color: var(--text);
+        background: var(--bg);
+      }
 
-      setResults({
-        loading: false,
-        items: resultsWithConfidence,
-      });
+      .orb {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 600px;
+        height: 600px;
+        pointer-events: none;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(255, 107, 0, 0.22) 0%, rgba(255, 107, 0, 0.12) 38%, rgba(255, 107, 0, 0) 72%);
+        transform: translate(calc(var(--mouse-x, 50vw) - 300px), calc(var(--mouse-y, 50vh) - 300px));
+        filter: blur(10px);
+        z-index: 1;
+      }
 
-      const firstSuspiciousIndex = resultsWithConfidence.findIndex(
-        (item) => item.analysis?.status !== 'Likely Real'
-      );
-      setActiveImageIndex(firstSuspiciousIndex >= 0 ? firstSuspiciousIndex : 0);
+      .terminal-grid-wrap {
+        position: fixed;
+        left: 0;
+        top: 0;
+        right: 0;
+        height: 100vh;
+        z-index: 0;
+        padding: 92px 18px 22px;
+      }
 
-      setIsAnalyzing(false);
-      pushNotification('Analysis complete! Check the results below.', 'success');
-    } catch (error) {
-      clearInterval(interval);
-      setResults(null);
-      setIsAnalyzing(false);
-      pushNotification(error.message || 'Analysis failed.', 'error');
-    }
-  }
+      .terminal-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-rows: repeat(2, minmax(190px, 1fr));
+        gap: 14px;
+        width: 100%;
+        height: calc(100vh - 114px);
+      }
 
-  function resetDetection() {
-    setImagePreviews([]);
-    setSelectedFiles([]);
-    setActiveImageIndex(0);
-    setIsAnalyzing(false);
-    setResults(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
-    if (imageOverlayRef.current) imageOverlayRef.current.innerHTML = '';
-    pushNotification('Ready for new image upload', 'info');
-  }
+      .terminal-window {
+        background: var(--terminal-bg);
+        border: 1px solid rgba(255, 107, 0, 0.1);
+        border-radius: 10px;
+        overflow: hidden;
+        opacity: 0;
+        transform: translateY(10px);
+        animation: terminalEnter 0.65s ease forwards, windowDrift 7s ease-in-out infinite;
+        animation-delay: var(--terminal-delay, 0s), calc(var(--terminal-delay, 0s) + 1s);
+      }
 
-  function getConfidenceClass(confidence) {
-    if (confidence >= 80) return 'confidence-high';
-    if (confidence >= 60) return 'confidence-medium';
-    return 'confidence-low';
-  }
+      .terminal-header {
+        height: 30px;
+        border-bottom: 1px solid rgba(255, 107, 0, 0.12);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 11px;
+      }
 
-  function getCredibilityColor(credibility) {
-    if (credibility >= 70) return 'green';
-    if (credibility >= 40) return 'yellow';
-    return 'red';
-  }
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
 
-  function getCredibilityClasses(credibility) {
-    const color = getCredibilityColor(credibility);
-    if (color === 'green') return { icon: 'text-green-400', bar: 'from-green-500 to-green-400' };
-    if (color === 'yellow') return { icon: 'text-yellow-400', bar: 'from-yellow-500 to-yellow-400' };
-    return { icon: 'text-red-400', bar: 'from-red-500 to-red-400' };
-  }
+      .dot.red { background: var(--error); }
+      .dot.yellow { background: var(--warn); }
+      .dot.green { background: var(--success); }
 
-  function getStatusClasses(status) {
-    if (status === 'Likely Real') {
-      return 'bg-green-500/20 text-green-400 border border-green-500/30';
-    }
-    if (status === 'Suspicious') {
-      return 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30';
-    }
-    return 'bg-red-500/20 text-red-400 border border-red-500/30';
-  }
+      .terminal-body {
+        position: relative;
+        padding: 12px 11px 14px;
+        font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+        font-size: 12px;
+        line-height: 1.55;
+        animation: streamShift 10s ease-in-out infinite;
+      }
 
-  function getStatusMessage(status) {
-    if (status === 'Likely Real') {
-      return 'This image appears authentic based on the current model output.';
-    }
-    if (status === 'Suspicious') {
-      return 'This image contains suspicious regions and may include manipulations.';
-    }
-    return 'This image is highly likely AI-generated or manipulated based on detected artifacts.';
-  }
+      .terminal-body::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(180deg, rgba(255, 107, 0, 0) 0%, rgba(255, 107, 0, 0.07) 50%, rgba(255, 107, 0, 0) 100%);
+        transform: translateY(-110%);
+        animation: scanSweep 3.2s linear infinite;
+      }
 
-  function getDetailClass(label, status) {
-    if (status === 'Likely Real') return 'text-green-400';
-    if (status === 'Suspicious' && label === 'Patterns') return 'text-yellow-400';
-    if (status === 'Suspicious') return 'text-orange-400';
-    if (label === 'Patterns') return 'text-yellow-400';
-    return 'text-red-400';
-  }
-  function getCredibilityLabel(credibility) {
-    if (credibility >= 70) return 'High Credibility';
-    if (credibility >= 40) return 'Medium Credibility';
-    return 'Low Credibility';
-  }
-  function getConfidenceDescription(confidence) {
-    if (confidence >= 80) return 'High confidence in this detection result';
-    if (confidence >= 60) return 'Moderate confidence - result may be reliable';
-    return 'Low confidence - consider additional verification';
-  }
+      .line {
+        opacity: 0;
+        display: block;
+        width: 0;
+        max-width: 100%;
+        color: var(--muted-dim);
+        white-space: nowrap;
+        overflow: hidden;
+        animation: typeLineLoop var(--window-duration, 3.6s) steps(var(--chars, 20), end) infinite;
+        animation-delay: var(--line-delay, 0s);
+      }
+
+      .line.prompt { color: var(--primary); }
+      .line.success { color: var(--success); }
+      .line.warn { color: var(--warn); }
+      .line.error { color: var(--error); }
+
+      .header {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 30;
+        height: 72px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 5rem;
+        background: rgba(0, 0, 0, 0.8);
+        backdrop-filter: blur(10px);
+        border-bottom: 1px solid rgba(255, 107, 0, 0.1);
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        text-decoration: none;
+        color: var(--text);
+        font-weight: 700;
+      }
+
+      .brand-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgba(255, 107, 0, 0.35);
+        background: rgba(255, 107, 0, 0.1);
+      }
+
+      .ai-chip {
+        font-family: 'Inter Tight', Inter, 'Segoe UI', sans-serif;
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.02em;
+        color: #000;
+        background: var(--primary);
+        border-radius: 5px;
+        padding: 2px 8px;
+      }
+
+      .nav {
+        display: inline-flex;
+        align-items: center;
+        gap: 26px;
+      }
+
+      .nav-link {
+        position: relative;
+        color: rgba(255, 255, 255, 0.78);
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 600;
+        transition: color 0.25s ease;
+      }
+
+      .nav-link::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        bottom: -6px;
+        width: 100%;
+        height: 2px;
+        transform: scaleX(0);
+        transform-origin: left;
+        background: var(--primary);
+        transition: transform 0.25s ease;
+      }
+
+      .nav-link:hover {
+        color: var(--text);
+      }
+
+      .nav-link:hover::after {
+        transform: scaleX(1);
+      }
+
+      .hero {
+        position: relative;
+        z-index: 10;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        padding-left: 5rem;
+        padding-right: 1.25rem;
+      }
+
+      .hero::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: min(62vw, 920px);
+        pointer-events: none;
+        z-index: 0;
+        background: linear-gradient(
+          90deg,
+          rgba(0, 0, 0, 0.94) 0%,
+          rgba(0, 0, 0, 0.88) 38%,
+          rgba(0, 0, 0, 0.72) 62%,
+          rgba(0, 0, 0, 0.38) 82%,
+          rgba(0, 0, 0, 0) 100%
+        );
+        filter: blur(2px);
+      }
+
+      .hero-content {
+        max-width: 650px;
+        position: relative;
+        isolation: isolate;
+        z-index: 1;
+        padding: 1.2rem 1.25rem 1.2rem;
+        border-radius: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      .hero-content::before {
+        content: '';
+        position: absolute;
+        z-index: -1;
+        left: -18px;
+        right: -18px;
+        top: -16px;
+        bottom: -14px;
+        pointer-events: none;
+        border-radius: 16px;
+        background: linear-gradient(180deg, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.82) 52%, rgba(0, 0, 0, 0.62) 76%, rgba(0, 0, 0, 0) 100%);
+        filter: blur(9px);
+      }
+
+      .hero-content::after {
+        content: '';
+        position: absolute;
+        z-index: -1;
+        pointer-events: none;
+        left: -42px;
+        top: 12%;
+        width: 96px;
+        height: 72%;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(255, 107, 0, 0.18) 0%, rgba(255, 107, 0, 0.08) 44%, rgba(255, 107, 0, 0) 76%);
+        filter: blur(15px);
+      }
+
+      .reveal {
+        opacity: 0;
+        transform: translateY(10px);
+        animation: heroEnter 0.8s ease forwards;
+      }
+
+      .hero-badge {
+        width: fit-content;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid rgba(255, 107, 0, 0.45);
+        color: var(--primary);
+        background: rgba(255, 107, 0, 0.08);
+        border-radius: 999px;
+        padding: 8px 14px;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .headline {
+        font-family: 'Inter Tight', Inter, 'Segoe UI', sans-serif;
+        margin: 0;
+        font-size: clamp(3rem, 10vw, 7rem);
+        font-weight: 900;
+        line-height: 0.95;
+        letter-spacing: -0.03em;
+      }
+
+      .headline-line {
+        display: block;
+        background: linear-gradient(180deg, #ffffff 0%, #e6e6e6 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .subtitle-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--primary);
+        font-weight: 800;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+        font-size: 22px;
+      }
+
+      .subtitle-line {
+        width: 68px;
+        height: 1px;
+        background: rgba(255, 107, 0, 0.58);
+      }
+
+      .description {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.75;
+        max-width: 620px;
+      }
+
+      .cta-row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .btn {
+        border: 1px solid transparent;
+        border-radius: 11px;
+        height: 46px;
+        padding: 0 22px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 15px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+      }
+
+      .btn-primary {
+        background: var(--primary);
+        color: #0b0b0b;
+        box-shadow: 0 0 18px rgba(255, 107, 0, 0.28);
+      }
+
+      .btn-secondary {
+        color: #f7f7f7;
+        border-color: rgba(255, 255, 255, 0.35);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .btn:hover {
+        transform: translateY(-2px);
+      }
+
+      .btn-primary:hover {
+        box-shadow: 0 0 28px rgba(255, 107, 0, 0.45);
+      }
+
+      .btn-secondary:hover {
+        box-shadow: 0 0 22px rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .pill-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .feature-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 36px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        padding: 0 14px;
+        color: rgba(255, 255, 255, 0.84);
+        font-size: 14px;
+        background: rgba(255, 255, 255, 0.05);
+        transition: background 0.2s ease, border-color 0.2s ease;
+      }
+
+      .feature-pill:hover {
+        background: rgba(255, 255, 255, 0.13);
+        border-color: rgba(255, 255, 255, 0.32);
+      }
+
+      .feature-pill svg {
+        color: var(--success);
+      }
+
+      .about-shell {
+        position: relative;
+        z-index: 14;
+        background:
+          radial-gradient(circle at 35% 15%, rgba(255, 107, 0, 0.08) 0%, rgba(255, 107, 0, 0) 40%),
+          linear-gradient(180deg, rgba(0, 0, 0, 0.9) 0%, #000 100%);
+        border-top: 1px solid rgba(255, 107, 0, 0.12);
+      }
+
+      .about-inner {
+        padding: 4rem 2.9rem 5rem;
+      }
+
+      .about-heading {
+        max-width: 900px;
+        margin: 0 0 2.4rem;
+      }
+
+      .about-title {
+        margin: 0;
+        font-family: 'Inter Tight', Inter, sans-serif;
+        font-size: clamp(2rem, 6vw, 4.5rem);
+        line-height: 0.98;
+        letter-spacing: -0.025em;
+        color: rgba(255, 255, 255, 0.96);
+      }
+
+      .about-lead {
+        margin: 1rem 0 0;
+        color: rgba(255, 255, 255, 0.72);
+        max-width: 760px;
+        line-height: 1.65;
+      }
+
+      .about-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        border-top: 1px solid rgba(255, 255, 255, 0.12);
+        border-left: 1px solid rgba(255, 255, 255, 0.12);
+      }
+
+      .about-card {
+        min-height: 240px;
+        padding: 1.2rem 1.15rem 1.15rem;
+        border-right: 1px solid rgba(255, 255, 255, 0.12);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.01) 0%, rgba(255, 255, 255, 0.02) 100%),
+          repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.012) 0, rgba(255, 255, 255, 0.012) 2px, transparent 2px, transparent 6px);
+        transition: background 0.25s ease;
+      }
+
+      .about-card:hover {
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.015) 100%),
+          repeating-linear-gradient(135deg, rgba(255, 107, 0, 0.04) 0, rgba(255, 107, 0, 0.04) 2px, transparent 2px, transparent 6px);
+      }
+
+      .about-card-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+      }
+
+      .about-icon {
+        width: 30px;
+        height: 30px;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(255, 255, 255, 0.88);
+      }
+
+      .about-card-title {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.96);
+      }
+
+      .about-card-subtitle {
+        margin: 0.16rem 0 0;
+        font-size: 0.79rem;
+        color: rgba(255, 255, 255, 0.6);
+      }
+
+      .about-card-body {
+        margin: 0.75rem 0 0;
+        color: rgba(255, 255, 255, 0.8);
+        line-height: 1.55;
+        font-size: 0.93rem;
+      }
+
+      .about-points {
+        margin: 0.75rem 0 0;
+        padding-left: 0;
+        list-style: none;
+        display: grid;
+        gap: 0.34rem;
+      }
+
+      .about-points li {
+        position: relative;
+        padding-left: 0.9rem;
+        color: rgba(255, 255, 255, 0.76);
+        font-size: 0.82rem;
+      }
+
+      .about-points li::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0.5em;
+        width: 0.24rem;
+        height: 0.24rem;
+        border-radius: 50%;
+        background: #ff6b00;
+      }
+
+      .about-cta {
+        display: inline-block;
+        margin-top: 0.85rem;
+        color: rgba(255, 255, 255, 0.95);
+        text-decoration: none;
+        font-size: 0.84rem;
+        font-weight: 700;
+      }
+
+      .site-footer {
+        position: relative;
+        z-index: 14;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        background: #030303;
+      }
+
+      .footer-cta {
+        padding: 4.2rem 1.25rem 4rem;
+        text-align: center;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        background:
+          radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0) 62%),
+          repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.016) 0, rgba(255, 255, 255, 0.016) 2px, transparent 2px, transparent 6px);
+      }
+
+      .footer-cta-title {
+        margin: 0;
+        font-family: 'Inter Tight', Inter, sans-serif;
+        font-size: clamp(2rem, 5vw, 4.4rem);
+        line-height: 0.94;
+        letter-spacing: -0.03em;
+        color: rgba(255, 255, 255, 0.95);
+      }
+
+      .footer-cta-text {
+        margin: 1rem auto 0;
+        max-width: 700px;
+        color: rgba(255, 255, 255, 0.62);
+        line-height: 1.55;
+      }
+
+      .footer-cta-actions {
+        margin-top: 1.6rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.72rem;
+      }
+
+      .footer-action {
+        height: 46px;
+        padding: 0 1.5rem;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 0;
+        text-decoration: none;
+        text-transform: uppercase;
+        letter-spacing: 0.11em;
+        font-size: 0.74rem;
+        font-weight: 800;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.2s ease, background 0.2s ease;
+      }
+
+      .footer-action.primary {
+        background: #ffffff;
+        color: #0a0a0a;
+      }
+
+      .footer-action.secondary {
+        color: rgba(255, 255, 255, 0.88);
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .footer-action:hover {
+        transform: translateY(-1px);
+      }
+
+      .footer-main {
+        padding: 2.7rem 2.8rem 2.5rem;
+      }
+
+      .footer-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 2rem;
+      }
+
+      .footer-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.62rem;
+        color: rgba(255, 255, 255, 0.9);
+        font-weight: 700;
+      }
+
+      .footer-brand-mark {
+        width: 19px;
+        height: 19px;
+        border-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .footer-cols {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(130px, 1fr));
+        gap: 2.2rem;
+      }
+
+      .footer-col h4 {
+        margin: 0;
+        font-size: 0.73rem;
+        text-transform: uppercase;
+        letter-spacing: 0.11em;
+        color: rgba(255, 255, 255, 0.45);
+      }
+
+      .footer-col ul {
+        list-style: none;
+        margin: 0.9rem 0 0;
+        padding: 0;
+        display: grid;
+        gap: 0.55rem;
+      }
+
+      .footer-col li,
+      .footer-col a {
+        color: rgba(255, 255, 255, 0.82);
+        text-decoration: none;
+        font-size: 0.92rem;
+      }
+
+      .footer-col a:hover {
+        color: #ffffff;
+      }
+
+      .footer-bottom {
+        margin-top: 2.2rem;
+        padding-top: 1.05rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.09);
+        color: rgba(255, 255, 255, 0.45);
+        font-size: 0.77rem;
+      }
+
+      .login-page {
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 22% 40%, rgba(255, 107, 0, 0.12) 0%, rgba(255, 107, 0, 0) 38%),
+          #000000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+        position: relative;
+      }
+
+      .login-close {
+        position: fixed;
+        right: 1.6rem;
+        top: 1rem;
+        border: none;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.82);
+        font-size: 1.4rem;
+        cursor: pointer;
+      }
+
+      .login-card {
+        width: min(100%, 400px);
+        border-radius: 10px;
+        background: linear-gradient(180deg, rgba(8, 8, 8, 0.98) 0%, rgba(2, 2, 2, 0.98) 100%);
+        border: 1px solid rgba(255, 107, 0, 0.28);
+        box-shadow: 0 26px 58px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 107, 0, 0.08) inset;
+        padding: 1.1rem 1.1rem 1.25rem;
+      }
+
+      .login-brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.58rem;
+        color: rgba(255, 255, 255, 0.9);
+        font-weight: 700;
+      }
+
+      .login-brand .footer-brand-mark {
+        border-color: rgba(255, 107, 0, 0.44);
+        color: #ff6b00;
+      }
+
+      .login-brand .footer-brand-mark {
+        width: 18px;
+        height: 18px;
+      }
+
+      .login-title {
+        margin: 0.9rem 0 0;
+        font-size: 2rem;
+        font-family: 'Inter Tight', Inter, sans-serif;
+        letter-spacing: -0.02em;
+        color: rgba(255, 255, 255, 0.97);
+      }
+
+      .login-sub {
+        margin: 0.38rem 0 0;
+        color: rgba(255, 255, 255, 0.46);
+        font-size: 0.9rem;
+      }
+
+      .login-google {
+        margin-top: 1.15rem;
+        width: 100%;
+        height: 44px;
+        border-radius: 7px;
+        border: 1px solid rgba(255, 107, 0, 0.28);
+        background: rgba(255, 107, 0, 0.06);
+        color: rgba(255, 255, 255, 0.95);
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .login-google:hover {
+        background: rgba(255, 107, 0, 0.12);
+      }
+
+      .login-divider {
+        margin: 0.95rem 0;
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        color: rgba(255, 255, 255, 0.72);
+        font-size: 0.82rem;
+        font-weight: 700;
+      }
+
+      .login-divider::before,
+      .login-divider::after {
+        content: '';
+        flex: 1;
+        height: 1px;
+        background: rgba(255, 107, 0, 0.22);
+      }
+
+      .login-input {
+        width: 100%;
+        height: 42px;
+        border-radius: 7px;
+        border: 1px solid rgba(255, 107, 0, 0.2);
+        background: rgba(255, 107, 0, 0.03);
+        color: #fff;
+        padding: 0 0.82rem;
+        margin-bottom: 0.72rem;
+      }
+
+      .login-input:focus {
+        outline: none;
+        border-color: rgba(255, 107, 0, 0.58);
+        box-shadow: 0 0 0 3px rgba(255, 107, 0, 0.14);
+      }
+
+      .login-input::placeholder {
+        color: rgba(255, 255, 255, 0.42);
+      }
+
+      .login-forgot {
+        text-align: right;
+        margin-bottom: 0.7rem;
+      }
+
+      .login-forgot a {
+        color: rgba(255, 182, 132, 0.9);
+        font-size: 0.79rem;
+        text-decoration: none;
+      }
+
+      .login-submit {
+        width: 100%;
+        height: 42px;
+        border: none;
+        border-radius: 7px;
+        font-weight: 700;
+        background: #ff6b00;
+        color: #110b07;
+        cursor: pointer;
+      }
+
+      .login-submit:hover {
+        background: #ff7e26;
+      }
+
+      .login-signup {
+        text-align: center;
+        margin-top: 1rem;
+        color: rgba(255, 255, 255, 0.58);
+        font-size: 0.84rem;
+      }
+
+      .login-signup a {
+        color: rgba(255, 184, 138, 0.95);
+      }
+
+      .app-shell {
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 50% 36%, rgba(255, 107, 0, 0.09) 0%, rgba(255, 107, 0, 0) 32%),
+          #000;
+        position: relative;
+      }
+
+      .app-sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 36px;
+        border-right: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+        padding-top: 0.8rem;
+        background: rgba(0, 0, 0, 0.5);
+      }
+
+      .app-side-dot {
+        width: 18px;
+        height: 18px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(255, 255, 255, 0.74);
+      }
+
+      .app-top {
+        height: 40px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        margin-left: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding: 0 14px;
+        gap: 0.65rem;
+      }
+
+      .app-top a,
+      .app-top span {
+        color: rgba(255, 255, 255, 0.86);
+        text-decoration: none;
+        font-size: 0.77rem;
+        font-weight: 600;
+      }
+
+      .app-user-pill {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        border: 1px solid rgba(255, 107, 0, 0.38);
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 107, 0, 0.08);
+        color: rgba(255, 255, 255, 0.92);
+        cursor: pointer;
+        transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+        position: relative;
+      }
+
+      .app-user-pill:hover {
+        transform: translateY(-1px) scale(1.03);
+        background: rgba(255, 107, 0, 0.14);
+        border-color: rgba(255, 107, 0, 0.58);
+      }
+
+      .account-dropdown-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+      }
+
+      .account-dropdown {
+        position: absolute;
+        top: calc(100% + 10px);
+        right: 0;
+        min-width: 180px;
+        border-radius: 14px;
+        border: 1px solid rgba(255, 107, 0, 0.22);
+        background: rgba(8, 8, 8, 0.96);
+        box-shadow: 0 18px 42px rgba(0, 0, 0, 0.45);
+        padding: 0.45rem;
+        z-index: 50;
+      }
+
+      .account-dropdown button,
+      .account-dropdown a {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        padding: 0.7rem 0.8rem;
+        border: none;
+        border-radius: 10px;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.9);
+        text-decoration: none;
+        font-size: 0.86rem;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .account-dropdown button:hover,
+      .account-dropdown a:hover {
+        background: rgba(255, 107, 0, 0.12);
+      }
+
+      .account-dropdown .danger {
+        color: #ffb18a;
+      }
+
+      .app-main {
+        margin-left: 36px;
+        min-height: calc(100vh - 40px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.8rem;
+        position: relative;
+      }
+
+      .app-orb-wrap {
+        position: absolute;
+        width: min(58vw, 720px);
+        height: min(58vw, 720px);
+        max-height: 68vh;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        opacity: 0.52;
+        filter: saturate(1.18) brightness(0.98);
+        z-index: 0;
+      }
+
+      .detect-center {
+        width: min(100%, 700px);
+        text-align: center;
+        position: relative;
+        z-index: 1;
+      }
+
+      .detect-logo {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.55rem;
+        color: rgba(255, 255, 255, 0.95);
+        font-weight: 700;
+      }
+
+      .detect-logo .footer-brand-mark {
+        width: 22px;
+        height: 22px;
+        border-color: rgba(255, 107, 0, 0.44);
+        color: #ff6b00;
+      }
+
+      .detect-panel {
+        margin-top: 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 999px;
+        background: rgba(17, 17, 17, 0.9);
+        padding: 0.6rem;
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 0.5rem;
+        align-items: center;
+        overflow: visible;
+      }
+
+      .detect-start-btn {
+        margin-top: 1rem;
+        height: 42px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 107, 0, 0.45);
+        background: rgba(255, 107, 0, 0.12);
+        color: rgba(255, 255, 255, 0.95);
+        padding: 0 1.1rem;
+        font-weight: 700;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-left: auto;
+        margin-right: auto;
+      }
+
+      .detect-uploader {
+        position: relative;
+        height: 40px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        background: rgba(255, 255, 255, 0.03);
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 0.5rem;
+        padding: 0 0.8rem;
+        color: rgba(255, 255, 255, 0.64);
+      }
+
+      .detect-uploader input {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
+
+      .detect-mode {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(255, 255, 255, 0.03);
+        height: 40px;
+        padding: 0 0.85rem;
+        color: rgba(255, 255, 255, 0.9);
+        cursor: pointer;
+        position: relative;
+      }
+
+      .detect-mode-menu {
+        position: absolute;
+        top: calc(100% + 8px);
+        left: 0;
+        min-width: 220px;
+        border-radius: 14px;
+        border: 1px solid rgba(255, 107, 0, 0.22);
+        background: rgba(8, 8, 8, 0.98);
+        box-shadow: 0 18px 42px rgba(0, 0, 0, 0.45);
+        padding: 0.35rem;
+        z-index: 30;
+      }
+
+      .detect-mode-option {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.6rem;
+        padding: 0.78rem 0.8rem;
+        border: none;
+        border-radius: 10px;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.92);
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .detect-mode-option:hover {
+        background: rgba(255, 107, 0, 0.12);
+      }
+
+      .detect-mode-option.active {
+        background: rgba(255, 107, 0, 0.16);
+      }
+
+      .detect-mode-option-left {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+      }
+
+      .detect-mode-option-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 107, 0, 0.2);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 107, 0, 0.06);
+        color: #ffb07a;
+      }
+
+      .detect-scan {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: none;
+        background: #ffffff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        color: #0e0e0e;
+      }
+
+      .preview-strip {
+        margin-top: 1rem;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.6rem;
+      }
+
+      .preview-item {
+        height: 92px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .preview-item img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .scan-results {
+        margin-top: 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 12px;
+        background: rgba(10, 10, 10, 0.85);
+        padding: 0.95rem;
+        text-align: left;
+      }
+
+      .scan-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.7rem;
+      }
+
+      .scan-card {
+        border: 1px solid rgba(255, 255, 255, 0.11);
+        border-radius: 10px;
+        padding: 0.72rem;
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .scan-card h4 {
+        margin: 0;
+        color: rgba(255, 255, 255, 0.95);
+        font-size: 0.86rem;
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+
+      .scan-stat {
+        margin-top: 0.56rem;
+        font-size: 1.35rem;
+        font-weight: 800;
+      }
+
+      .graph-bars {
+        margin-top: 0.58rem;
+        display: grid;
+        gap: 0.34rem;
+      }
+
+      .graph-bar {
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+      }
+
+      .graph-bar span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #ff6b00, #ff9e61);
+      }
+
+      @keyframes heroEnter {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      @keyframes terminalEnter {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      @keyframes windowDrift {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-2px); }
+      }
+
+      @keyframes typeLineLoop {
+        0% {
+          width: 0;
+          opacity: 0;
+        }
+        10% {
+          opacity: 1;
+        }
+        68%, 100% {
+          width: calc(var(--chars, 20) * 1ch);
+          opacity: 1;
+        }
+      }
+
+      @keyframes streamShift {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-5px); }
+      }
+
+      @keyframes scanSweep {
+        0% { transform: translateY(-110%); }
+        100% { transform: translateY(120%); }
+      }
+
+      @media (max-width: 1080px) {
+        .header {
+          padding-left: 1.25rem;
+          padding-right: 1.25rem;
+        }
+
+        .hero {
+          padding-left: 1.25rem;
+          padding-top: 94px;
+          align-items: flex-start;
+        }
+
+        .hero::before {
+          width: 100%;
+          background: linear-gradient(
+            180deg,
+            rgba(0, 0, 0, 0.9) 0%,
+            rgba(0, 0, 0, 0.76) 52%,
+            rgba(0, 0, 0, 0.42) 78%,
+            rgba(0, 0, 0, 0) 100%
+          );
+        }
+
+        .hero-content {
+          max-width: 100%;
+          padding: 1rem 0.9rem 1.05rem;
+        }
+
+        .terminal-grid-wrap {
+          padding-top: 86px;
+        }
+
+        .about-inner {
+          padding: 3.4rem 1.25rem 4rem;
+        }
+
+        .about-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .footer-main {
+          padding: 2.3rem 1.25rem 2rem;
+        }
+
+        .footer-top {
+          flex-direction: column;
+        }
+
+        .scan-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 860px) {
+        .nav {
+          gap: 16px;
+        }
+
+        .terminal-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          grid-template-rows: repeat(4, minmax(130px, 1fr));
+          height: calc(100vh - 100px);
+        }
+
+        .subtitle-row {
+          font-size: 16px;
+          letter-spacing: 0.09em;
+        }
+
+        .subtitle-line {
+          width: 42px;
+        }
+
+        .cta-row {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .btn {
+          width: 100%;
+          max-width: 290px;
+        }
+
+        .footer-cols {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          width: 100%;
+        }
+
+        .preview-strip {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 620px) {
+        .header {
+          height: 64px;
+        }
+
+        .nav {
+          display: none;
+        }
+
+        .hero {
+          min-height: auto;
+          padding-top: 92px;
+          padding-bottom: 32px;
+        }
+
+        .terminal-grid-wrap {
+          position: fixed;
+          opacity: 0.42;
+        }
+
+        .terminal-body {
+          font-size: 11px;
+        }
+
+        .about-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .about-card {
+          min-height: 0;
+        }
+
+        .login-title {
+          font-size: 1.75rem;
+        }
+
+        .footer-cta {
+          padding: 3.1rem 0.9rem 2.8rem;
+        }
+
+        .footer-cta-actions {
+          display: grid;
+          width: 100%;
+          max-width: 320px;
+          margin-left: auto;
+          margin-right: auto;
+        }
+
+        .footer-action {
+          width: 100%;
+        }
+
+        .footer-cols {
+          grid-template-columns: 1fr;
+        }
+
+        .detect-panel {
+          grid-template-columns: 1fr;
+          border-radius: 16px;
+        }
+
+        .detect-mode-menu {
+          left: 0;
+          right: 0;
+          min-width: 0;
+        }
+
+        .app-top {
+          justify-content: flex-start;
+          overflow-x: auto;
+          white-space: nowrap;
+        }
+
+        .account-dropdown {
+          right: auto;
+          left: 0;
+        }
+
+        .app-orb-wrap {
+          width: min(90vw, 520px);
+          height: min(90vw, 520px);
+          opacity: 0.42;
+        }
+      }
+    `,
+    []
+  );
 
   return (
-    <>
-      {/* Animated gradient background layer */}
-      <div className="bg-anim"></div>
-      {/* Full-viewport animated background */}
-      <LightPillar
-        topColor="#48FF28"
-        bottomColor="#9EF19E"
-        intensity={1}
-        rotationSpeed={0.1}
-        glowAmount={0.002}
-        pillarWidth={2}
-        pillarHeight={0.3}
-        noiseIntensity={0.5}
-        pillarRotation={25}
-        viewScale={1}
-        diagonalTilt={0}
-        interactive={false}
-        mixBlendMode="normal"
-      />
+    <div className="page">
+      <style>{embeddedStyles}</style>
 
-      <div className="relative z-10">
-      <div className="container mx-auto px-6 pt-8 md:pt-10">
-        <nav className="hero-nav-pill">
-          <div className="flex items-center justify-between">
-            <a href="#home" className="flex items-center space-x-3 text-white/90 hover:text-white transition-colors">
-              <div className="w-9 h-9 hero-logo-badge rounded-full flex items-center justify-center">
-                <i className="fas fa-shield-alt text-white text-sm"></i>
-              </div>
-              <h1 className="text-lg md:text-xl font-semibold tracking-wide">VerifAI</h1>
-            </a>
-            <div className="hidden md:flex items-center gap-8 pr-2">
-              <a href="#home" className="hero-nav-link">Home</a>
-              <a href="#about" className="hero-nav-link">About</a>
-              <a href="#detect" className="hero-nav-link">Detect</a>
-              <a href="#features" className="hero-nav-link">Features</a>
-            </div>
-            <button onClick={() => setMobileOpen(true)} className="md:hidden text-white/90">
-              <i className="fas fa-bars text-xl"></i>
-            </button>
-          </div>
-        </nav>
-      </div>
+      {currentView === 'app' ? (
+        <section className="app-shell" id="app">
+          <aside className="app-sidebar" aria-label="App quick actions">
+            <span className="app-side-dot"><Shield size={12} /></span>
+            <span className="app-side-dot"><Plus size={12} /></span>
+            <span className="app-side-dot"><History size={12} /></span>
+            <span className="app-side-dot"><Link2 size={12} /></span>
+          </aside>
 
-      {mobileOpen && (
-        <div className="fixed inset-0 bg-black/95 z-50 md:hidden">
-          <div className="flex flex-col items-center justify-center h-full space-y-8">
-            <a href="#home" onClick={() => setMobileOpen(false)} className="text-2xl text-gray-300 hover:text-white transition-colors">Home</a>
-            <a href="#about" onClick={() => setMobileOpen(false)} className="text-2xl text-gray-300 hover:text-white transition-colors">About</a>
-            <a href="#detect" onClick={() => setMobileOpen(false)} className="text-2xl text-gray-300 hover:text-white transition-colors">Detect</a>
-            <a href="#features" onClick={() => setMobileOpen(false)} className="text-2xl text-gray-300 hover:text-white transition-colors">Features</a>
-            <button onClick={() => setMobileOpen(false)} className="text-white">
-              <i className="fas fa-times text-2xl"></i>
-            </button>
-          </div>
-        </div>
-      )}
+          <header className="app-top">
+            <span style={{ color: 'rgba(255,255,255,0.72)', fontSize: '0.76rem', marginRight: '0.25rem' }}>Hi,</span>
+            <div className="account-dropdown-wrap" ref={accountMenuRef}>
+              <button type="button" className="app-user-pill" onClick={toggleAccountMenu} aria-label="Account menu">
+                MO
+              </button>
 
-      <section id="home" className="container mx-auto px-6 pt-16 md:pt-20 pb-20 min-h-[78vh] md:min-h-[82vh] flex items-center justify-center">
-        <div className="text-center max-w-4xl w-full">
-          <div className="hero-top-badge mb-8">
-            <i className="fas fa-sparkles mr-2 text-[0.68rem]"></i>
-            AI Image Detection
-          </div>
-          <div className="mb-6 hero-focus-wrap">
-            <TrueFocus
-              sentence="AI Image Detection System|Powered by YOLOv5"
-              separator="|"
-              vertical={true}
-              manualMode={false}
-              blurAmount={5}
-              borderColor="#48FF28"
-              glowColor="rgba(72, 255, 40, 0.55)"
-              animationDuration={0.5}
-              pauseBetweenAnimations={1}
-            />
-          </div>
-          <p className="text-base md:text-lg text-gray-300/95 max-w-2xl mx-auto mb-9 leading-relaxed">
-            Detect AI-generated or manipulated images in seconds with confidence scoring and clear visual results.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <a href="#detect" className="hero-cta-primary">
-              Detection
-            </a>
-            <a href="#about" className="hero-cta-secondary">
-              Learn More
-            </a>
-          </div>
-        </div>
-      </section>
-
-      <section id="about" className="container mx-auto px-6 py-20">
-        <div className="max-w-4xl mx-auto">
-          <h3 className="text-4xl font-bold text-white text-center mb-12">About VerifAI</h3>
-          <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-8 border border-white/10">
-            <p className="text-gray-300 leading-relaxed mb-6">
-              VerifAI is a cutting-edge Machine Learning-based AI Image Detection System designed to combat the growing threat of AI-generated misinformation. 
-              Using the advanced MT-YOLOv6 architecture, our system analyzes visual content to determine authenticity with remarkable accuracy.
-            </p>
-            <p className="text-gray-300 leading-relaxed mb-6">
-              The system integrates sophisticated credibility scoring mechanisms to provide users with comprehensive insights about image reliability, 
-              helping to create a safer digital environment for everyone.
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="flex items-start space-x-3">
-                <i className="fas fa-brain text-blue-400 text-xl mt-1"></i>
-                <div>
-                  <h4 className="text-white font-semibold mb-1">Advanced AI Technology</h4>
-                  <p className="text-gray-400 text-sm">Powered by MT-YOLOv6 for real-time detection</p>
+              {accountMenuOpen && (
+                <div className="account-dropdown" role="menu" aria-label="Account options">
+                  <a href="#app" role="menuitem" onClick={() => setAccountMenuOpen(false)}>
+                    <span>Profile</span>
+                    <span>›</span>
+                  </a>
+                  <a href="#about" role="menuitem" onClick={() => setAccountMenuOpen(false)}>
+                    <span>Settings</span>
+                    <span>›</span>
+                  </a>
+                  <button type="button" className="danger" onClick={signOut} role="menuitem">
+                    <span>Sign out</span>
+                    <span>↗</span>
+                  </button>
                 </div>
-              </div>
-              <div className="flex items-start space-x-3">
-                <i className="fas fa-chart-line text-purple-400 text-xl mt-1"></i>
-                <div>
-                  <h4 className="text-white font-semibold mb-1">Credibility Scoring</h4>
-                  <p className="text-gray-400 text-sm">Quantitative reliability assessment</p>
-                </div>
-              </div>
-              <div className="flex items-start space-x-3">
-                <i className="fas fa-bolt text-yellow-400 text-xl mt-1"></i>
-                <div>
-                  <h4 className="text-white font-semibold mb-1">Real-time Processing</h4>
-                  <p className="text-gray-400 text-sm">Instant analysis and results</p>
-                </div>
-              </div>
-              <div className="flex items-start space-x-3">
-                <i className="fas fa-shield-alt text-green-400 text-xl mt-1"></i>
-                <div>
-                  <h4 className="text-white font-semibold mb-1">Privacy Protection</h4>
-                  <p className="text-gray-400 text-sm">Secure image processing</p>
-                </div>
-              </div>
+              )}
             </div>
-          </div>
+          </header>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
-            <div className="rounded-2xl border border-green-300/20 bg-gradient-to-r from-green-900/35 to-black/45 backdrop-blur-sm p-6 shadow-[0_0_18px_rgba(72,255,40,0.12)]">
-              <div className="text-4xl font-bold text-blue-400 mb-2">95%+</div>
-              <div className="text-gray-200 text-2xl/6 md:text-xl">Detection Accuracy</div>
+          <main className="app-main">
+            <div className="app-orb-wrap" aria-hidden="true">
+              <Orb
+                hue={24}
+                hoverIntensity={0.32}
+                rotateOnHover={false}
+                forceHoverState={true}
+                backgroundColor="#000000"
+              />
             </div>
-            <div className="rounded-2xl border border-green-300/20 bg-gradient-to-r from-green-900/35 to-black/45 backdrop-blur-sm p-6 shadow-[0_0_18px_rgba(72,255,40,0.12)]">
-              <div className="text-4xl font-bold text-fuchsia-400 mb-2">&lt;2s</div>
-              <div className="text-gray-200 text-2xl/6 md:text-xl">Processing Time</div>
-            </div>
-            <div className="rounded-2xl border border-green-300/20 bg-gradient-to-r from-green-900/35 to-black/45 backdrop-blur-sm p-6 shadow-[0_0_18px_rgba(72,255,40,0.12)]">
-              <div className="text-4xl font-bold text-green-400 mb-2">24/7</div>
-              <div className="text-gray-200 text-2xl/6 md:text-xl">Available</div>
-            </div>
-          </div>
-        </div>
-      </section>
 
-      <section id="detect" className="container mx-auto px-6 py-20">
-        <div className="max-w-4xl mx-auto">
-          <h3 className="text-4xl font-bold text-white text-center mb-12">Image Detection</h3>
+            <section className="detect-center">
+              <div className="detect-logo">
+                <span className="footer-brand-mark" aria-hidden="true">
+                  <Shield size={12} strokeWidth={2.2} />
+                </span>
+                <span>VERIFAI AI</span>
+              </div>
 
-          {imagePreviews.length === 0 && (
-            <div
-              id="uploadArea"
-              ref={uploadAreaRef}
-              onDragOver={onDragOver}
-              onDragLeave={onDragLeave}
-              onDrop={onDrop}
-              onClick={(e) => {
-                if (e.target === uploadAreaRef.current || e.target.parentElement === uploadAreaRef.current) {
-                  onChooseImageClick();
-                }
-              }}
-              className="group bg-white/5 backdrop-blur-sm rounded-2xl p-8 border border-white/10 border-dashed border-2 hover:border-emerald-400 hover:shadow-[0_0_28px_rgba(72,255,40,0.2)] transition-all duration-300 upload-area"
-            >
-              <div className="text-center">
-                <i className="fas fa-cloud-upload-alt text-6xl text-emerald-400 mb-4 transition-colors group-hover:text-[#48FF28]"></i>
-                <h4 className="text-2xl font-semibold text-white mb-2">Upload Images for Analysis</h4>
-                <p className="text-gray-400 mb-6">Drag and drop image(s) here or click to browse</p>
-                <input ref={fileInputRef} onChange={onFileChange} type="file" accept="image/*" multiple className="hidden" />
-                <button onClick={onChooseImageClick} className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-lg font-semibold hover:from-green-400 hover:to-emerald-500 hover:shadow-[0_0_20px_rgba(72,255,40,0.4)] transition-all">
-                  <i className="fas fa-folder-open mr-2"></i>Choose Images
+              {!showDetectFlow ? (
+                <button type="button" className="detect-start-btn" onClick={() => setShowDetectFlow(true)}>
+                  Open Detection
                 </button>
-                <p className="text-gray-500 text-sm mt-4">Supported formats: JPG, PNG (Max 10MB)</p>
-              </div>
-            </div>
-          )}
+              ) : (
+                <>
+                  <div className="detect-panel">
+                    <label className="detect-uploader">
+                      {scanMode === 'single' ? <ImagePlus size={16} /> : <Images size={16} />}
+                      <span>{selectedImages.length > 0 ? `${selectedImages.length} image(s) selected` : 'Upload image(s) for detection'}</span>
+                      <input type="file" accept="image/*" multiple={scanMode === 'batch'} onChange={onUploadImages} />
+                    </label>
 
-          {imagePreviews.length > 0 && (
-            <div id="previewArea" className="bg-white/5 backdrop-blur-sm rounded-2xl p-6 border border-white/10 animate-fade-in">
-              <div className="mb-6">
-                <h4 className="text-xl font-semibold text-white mb-4">Selected Image ({activeImageIndex + 1}/{imagePreviews.length})</h4>
-                <div className="relative max-w-2xl mx-auto">
-                  <img src={imagePreviews[activeImageIndex]} alt="Selected" className="w-full rounded-lg max-h-96 object-contain" />
-                  <div ref={imageOverlayRef} className="absolute inset-0 pointer-events-none"></div>
-                </div>
-                {imagePreviews.length > 1 && (
-                  <div className="mt-4 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                    {imagePreviews.map((preview, index) => (
-                      <button
-                        key={`preview-${index}`}
-                        onClick={() => setActiveImageIndex(index)}
-                        className={`rounded-md overflow-hidden border-2 transition-all ${activeImageIndex === index ? 'border-emerald-400' : 'border-white/20 hover:border-white/50'}`}
-                        aria-label={`View image ${index + 1}`}
-                      >
-                        <img src={preview} alt={`Preview ${index + 1}`} className="w-full h-16 object-cover" />
+                    <div className="detect-mode" ref={modeMenuRef}>
+                      <button type="button" onClick={toggleModeMenu} style={{ all: 'unset', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', width: '100%', cursor: 'pointer' }}>
+                        <span>{scanMode === 'single' ? 'Single Image' : 'Batch Image'}</span>
+                        <ChevronDown size={14} />
                       </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div>
-                <h4 className="text-xl font-semibold text-white mb-4">Analysis Results</h4>
-                <div id="results" className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {!results && null}
-                  {results?.loading && (
-                    <div className="flex flex-col items-center justify-center py-12 md:col-span-2">
-                      <div className="loading-spinner mb-4"></div>
-                      <p className="text-gray-400">Analyzing image with MT-YOLOv6...</p>
-                      <div className="progress-bar w-full max-w-md mt-4">
-                        <div className="progress-fill" style={{ width: `${results.progress}%` }}></div>
-                      </div>
+
+                      {modeMenuOpen && (
+                        <div className="detect-mode-menu" role="menu" aria-label="Detection mode options">
+                          <button type="button" className={`detect-mode-option ${scanMode === 'single' ? 'active' : ''}`} onClick={() => selectScanMode('single')}>
+                            <span className="detect-mode-option-left">
+                              <span className="detect-mode-option-icon"><ImagePlus size={14} /></span>
+                              <span>Single Image</span>
+                            </span>
+                            <span>1</span>
+                          </button>
+                          <button type="button" className={`detect-mode-option ${scanMode === 'batch' ? 'active' : ''}`} onClick={() => selectScanMode('batch')}>
+                            <span className="detect-mode-option-left">
+                              <span className="detect-mode-option-icon"><Images size={14} /></span>
+                              <span>Batch Image</span>
+                            </span>
+                            <span>8</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {!results?.loading && results && (() => {
-                    const activeResult = results.items?.[activeImageIndex];
-                    if (!activeResult) return null;
 
-                    return (
-                    <>
-                      {results.items.length > 1 && (
-                        <div className="result-card md:col-span-2">
-                          <h5 className="text-base font-semibold text-white mb-3">Batch Summary (Analyzed Individually)</h5>
-                          <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                            {results.items.map((item, index) => (
-                              <button
-                                key={`${item.filename}-${index}`}
-                                onClick={() => setActiveImageIndex(index)}
-                                className={`w-full text-left rounded-lg border px-3 py-2 transition-all ${activeImageIndex === index ? 'border-emerald-400 bg-emerald-500/10' : 'border-white/15 bg-white/5 hover:border-white/40'}`}
-                              >
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <span className="text-sm text-white font-medium truncate max-w-[55%]">{item.filename}</span>
-                                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusClasses(item.analysis.status)}`}>
-                                    {item.analysis.status}
-                                  </span>
-                                </div>
-                                <div className="mt-1 text-xs text-gray-300 flex flex-wrap gap-3">
-                                  <span>Credibility: {item.analysis.score}/100</span>
-                                  <span>Detections: {item.detections.length}</span>
-                                  <span>Image {index + 1} of {results.items.length}</span>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                    <button className="detect-scan" type="button" onClick={runScan} aria-label="Scan images">
+                      <Plane size={16} />
+                    </button>
+                  </div>
+                </>
+              )}
 
-                      <div className="result-card md:col-span-2">
-                        <div className="flex items-center justify-between mb-3">
-                          <h5 className="text-lg font-semibold text-white">Detection Result</h5>
-                          <span className={`px-3 py-1 rounded-full text-sm font-semibold ${getStatusClasses(activeResult.analysis.status)}`}>
-                            {activeResult.analysis.status}
-                          </span>
-                        </div>
-                        <p className="text-gray-300 text-sm">
-                          {getStatusMessage(activeResult.analysis.status)}
-                        </p>
-                        <p className="text-gray-500 text-xs mt-3">
-                          File: {activeResult.filename} ({activeImageIndex + 1}/{results.items.length}) | Model: {activeResult.model_path}
-                        </p>
-                      </div>
-                      <div className="result-card">
-                        <h5 className="text-base font-semibold text-white mb-2">Confidence</h5>
-                        <div className="text-2xl font-bold text-white mb-2">{activeResult.confidence.toFixed(1)}%</div>
-                        <div className="confidence-bar">
-                          <div className={`confidence-fill ${getConfidenceClass(activeResult.confidence)}`} style={{ width: `${activeResult.confidence}%` }}></div>
-                        </div>
-                        <p className="text-gray-400 text-xs mt-2">{getConfidenceDescription(activeResult.confidence)}</p>
-                      </div>
-                      <div className="result-card">
-                        <h5 className="text-base font-semibold text-white mb-2">Credibility</h5>
-                        {(() => {
-                          const credibilityClasses = getCredibilityClasses(activeResult.analysis.score);
-                          return (
-                        <div className="flex items-center gap-2 mb-2">
-                          <i className={`fas fa-shield-alt ${credibilityClasses.icon}`}></i>
-                          <span className="text-2xl font-bold text-white">{activeResult.analysis.score.toFixed(0)}/100</span>
-                        </div>
-                          );
-                        })()}
-                        <div className="w-full bg-gray-700 rounded-full h-2">
-                          {(() => {
-                            const credibilityClasses = getCredibilityClasses(activeResult.analysis.score);
-                            return <div className={`bg-gradient-to-r ${credibilityClasses.bar} h-2 rounded-full`} style={{ width: `${activeResult.analysis.score}%` }}></div>;
-                          })()}
-                        </div>
-                        <p className="text-gray-400 text-xs mt-2">{getCredibilityLabel(activeResult.analysis.score)}</p>
-                      </div>
-                      <div className="result-card">
-                        <h5 className="text-base font-semibold text-white mb-3">Analysis Details</h5>
-                        <div className="space-y-2 text-sm">
-                          <div className="flex justify-between">
-                            <span className="text-gray-400">Detections</span>
-                            <span className={activeResult.detections.length > 0 ? 'text-red-400' : 'text-green-400'}>{activeResult.detections.length}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-400">Anomalies</span>
-                            <span className={activeResult.analysis.anomalies_found > 0 ? 'text-orange-400' : 'text-green-400'}>{activeResult.analysis.anomalies_found}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-400">Patterns</span>
-                            <span className={getDetailClass('Patterns', activeResult.analysis.status)}>{activeResult.analysis.status === 'Likely Real' ? 'Normal' : 'Irregular'}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-400">Resolution</span>
-                            <span className="text-blue-300">{activeResult.dimensions?.[0]} x {activeResult.dimensions?.[1]}</span>
-                          </div>
-                        </div>
-                      </div>
-                      {activeResult.detections.length > 0 && (
-                        <div className="result-card md:col-span-2">
-                          <h5 className="text-base font-semibold text-white mb-3">Detected Regions</h5>
-                          <div className="space-y-2 text-sm max-h-48 overflow-y-auto pr-2">
-                            {activeResult.detections.map((detection, index) => (
-                              <div key={`${detection.class_name}-${index}`} className="flex items-center justify-between border-b border-white/10 pb-1">
-                                <span className="text-gray-300">{detection.class_name}</span>
-                                <span className="text-red-300">{(detection.confidence * 100).toFixed(1)}%</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      <div className="result-card bg-blue-500/10 border-blue-500/30">
-                        <h5 className="text-base font-semibold text-white mb-2">
-                          <i className="fas fa-info-circle text-blue-400 mr-2"></i>Recommendations
-                        </h5>
-                        <ul className="space-y-1 text-gray-300 text-sm">
-                          {activeResult.analysis.status === 'Likely Real' ? (
-                            <>
-                              <li>• Image appears authentic</li>
-                              <li>• Still verify source when possible</li>
-                              <li>• Can be shared with confidence</li>
-                            </>
-                          ) : activeResult.analysis.status === 'Suspicious' ? (
-                            <>
-                              <li>• Review highlighted regions carefully</li>
-                              <li>• Compare with original source if available</li>
-                              <li>• Request additional verification before sharing</li>
-                            </>
-                          ) : (
-                            <>
-                              <li>• Exercise caution when sharing</li>
-                              <li>• Verify source independently</li>
-                              <li>• Consider potential impact</li>
-                            </>
-                          )}
-                        </ul>
-                      </div>
-                    </>
-                    );
-                  })()}
+              {selectedImages.length > 0 && (
+                <div className="preview-strip">
+                  {selectedImages.map((item) => (
+                    <div className="preview-item" key={item.preview}>
+                      <img src={item.preview} alt={item.name} />
+                    </div>
+                  ))}
                 </div>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-4 mt-8 justify-center">
-                <button onClick={analyzeImage} className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-lg font-semibold hover:from-green-400 hover:to-emerald-500 hover:shadow-[0_0_20px_rgba(72,255,40,0.4)] transition-all">
-                  <i className="fas fa-search mr-2"></i>Analyze Images
-                </button>
-                <button onClick={resetDetection} className="px-6 py-3 bg-white/10 backdrop-blur-sm text-white rounded-lg font-semibold hover:bg-white/20 transition-all border border-white/20">
-                  <i className="fas fa-redo mr-2"></i>Upload New Images
-                </button>
-              </div>
+              )}
+
+              {hasScanned && (
+                <section className="scan-results">
+                  <div className="scan-grid">
+                    <article className="scan-card">
+                      <h4><BarChart2 size={14} /> Detection Confidence</h4>
+                      <div className="scan-stat">94.7%</div>
+                      <div className="graph-bars">
+                        <div className="graph-bar"><span style={{ width: '95%' }}></span></div>
+                        <div className="graph-bar"><span style={{ width: '78%' }}></span></div>
+                        <div className="graph-bar"><span style={{ width: '66%' }}></span></div>
+                      </div>
+                    </article>
+
+                    <article className="scan-card">
+                      <h4><PieChart size={14} /> Classification Split</h4>
+                      <div className="scan-stat">AI: 62%</div>
+                      <div className="graph-bars">
+                        <div className="graph-bar"><span style={{ width: '62%' }}></span></div>
+                        <div className="graph-bar"><span style={{ width: '38%' }}></span></div>
+                      </div>
+                    </article>
+
+                    <article className="scan-card">
+                      <h4><Activity size={14} /> Artifact Activity</h4>
+                      <div className="scan-stat">High</div>
+                      <div className="graph-bars">
+                        <div className="graph-bar"><span style={{ width: '88%' }}></span></div>
+                        <div className="graph-bar"><span style={{ width: '80%' }}></span></div>
+                        <div className="graph-bar"><span style={{ width: '71%' }}></span></div>
+                      </div>
+                    </article>
+                  </div>
+
+                  <div style={{ marginTop: '0.75rem', color: 'rgba(255,255,255,0.78)', fontSize: '0.86rem' }}>
+                    <Sparkles size={13} style={{ verticalAlign: 'middle', marginRight: '0.35rem' }} />
+                    Scan complete: image artifacts and metadata patterns were analyzed successfully.
+                  </div>
+                </section>
+              )}
+            </section>
+          </main>
+        </section>
+      ) : currentView === 'login' || currentView === 'signup' ? (
+        <section className="login-page" id="login">
+          <button className="login-close" onClick={closeAuthPage} aria-label="Close login">×</button>
+
+          <div className="login-card">
+            <div className="login-brand">
+              <span className="footer-brand-mark" aria-hidden="true">
+                <Shield size={11} strokeWidth={2.2} />
+              </span>
+              <span>VERIFAI</span>
             </div>
-          )}
+
+            <h2 className="login-title">{currentView === 'signup' ? 'Create your account' : 'Log into your account'}</h2>
+            <p className="login-sub">+30M users choose VerifAI</p>
+
+            <button className="login-google" type="button">Continue with Google</button>
+
+            <div className="login-divider">OR</div>
+
+            {currentView === 'signup' && (
+              <input className="login-input" type="text" placeholder="Enter your full name" />
+            )}
+            <input className="login-input" type="email" placeholder="Enter your email address" />
+            <input className="login-input" type="password" placeholder="Enter password" />
+            {currentView === 'signup' && (
+              <input className="login-input" type="password" placeholder="Confirm password" />
+            )}
+
+            {currentView === 'login' && (
+              <div className="login-forgot">
+                <a href="#home">Forgot Password?</a>
+              </div>
+            )}
+
+            <button className="login-submit" type="button" onClick={goToAppPage}>{currentView === 'signup' ? 'Sign Up' : 'Sign In'}</button>
+
+            <div className="login-signup">
+              {currentView === 'signup' ? (
+                <>
+                  Already have an account? <a href="#login" onClick={goToLoginPage}>Log in</a>
+                </>
+              ) : (
+                <>
+                  Don&apos;t have an account? <a href="#signup" onClick={goToSignupPage}>Sign up</a>
+                </>
+              )}
+            </div>
+          </div>
+        </section>
+      ) : (
+        <>
+      <div className="orb" aria-hidden="true"></div>
+
+      <header className="header">
+        <a href="#home" className="brand" aria-label="VerifAI home">
+          <span className="brand-icon">
+            <Shield size={16} color="#ff6b00" strokeWidth={2.2} />
+          </span>
+          <span>VerifAI</span>
+          <span className="ai-chip">AI</span>
+        </a>
+
+        <nav className="nav" aria-label="Primary">
+          <a className="nav-link" href="#home">Home</a>
+          <a className="nav-link" href="#about">About</a>
+          <a className="nav-link" href="#features">Feature</a>
+          <a className="nav-link" href="#login" onClick={goToLoginPage}>Login</a>
+        </nav>
+      </header>
+
+      <div className="terminal-grid-wrap" aria-hidden="true">
+        <div className="terminal-grid">
+          {terminals.map((terminal, terminalIndex) => (
+            <section
+              key={terminal.id}
+              className="terminal-window"
+              style={{ '--terminal-delay': `${terminalIndex * 0.3}s` }}
+            >
+              <div className="terminal-header">
+                <span className="dot red"></span>
+                <span className="dot yellow"></span>
+                <span className="dot green"></span>
+              </div>
+              <div className="terminal-body">
+                {terminal.lines.map((line, lineIndex) => (
+                  <div
+                    key={`${terminal.id}-${lineIndex}`}
+                    className={`line ${classifyLine(line)}`}
+                    style={{
+                      '--line-delay': `${terminalIndex * 0.24 + lineIndex * 0.3 + 0.18}s`,
+                      '--window-duration': `${3.2 + (terminalIndex % 4) * 0.2}s`,
+                      '--chars': `${Math.max(line.length, 12)}`,
+                    }}
+                  >
+                    {line}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      </div>
+
+      <main className="hero" id="home">
+        <section className="hero-content">
+          <div className="hero-badge reveal" style={{ animationDelay: `${heroAnimationDelays[0]}s` }}>
+            <Zap size={16} strokeWidth={2.4} />
+            <span>AI Image Detection</span>
+          </div>
+
+          <h1 className="headline reveal" style={{ animationDelay: `${heroAnimationDelays[1]}s` }}>
+            <span className="headline-line">AI Image</span>
+            <span className="headline-line">Detection System</span>
+          </h1>
+
+          <div className="subtitle-row reveal" style={{ animationDelay: `${heroAnimationDelays[2]}s` }}>
+            <span className="subtitle-line"></span>
+            <span>Powered by YOLOv8</span>
+            <span className="subtitle-line"></span>
+          </div>
+
+          <p className="description reveal" style={{ animationDelay: `${heroAnimationDelays[3]}s` }}>
+            Enterprise-grade AI agents with frontier and open-source model access. Detect AI-generated or
+            manipulated images in seconds with confidence scoring.
+          </p>
+
+          <div className="cta-row reveal" style={{ animationDelay: `${heroAnimationDelays[4]}s` }}>
+            <a className="btn btn-primary" href="#detect">Get Started →</a>
+            <a className="btn btn-secondary" href="#about">Learn More</a>
+          </div>
+
+          <div className="pill-row reveal" style={{ animationDelay: `${heroAnimationDelays[5]}s` }} id="features">
+            <span className="feature-pill">
+              <CheckCircle size={15} />
+              Real-time Detection
+            </span>
+            <span className="feature-pill">
+              <CheckCircle size={15} />
+              95%+ Accuracy
+            </span>
+            <span className="feature-pill">
+              <CheckCircle size={15} />
+              API Access
+            </span>
+          </div>
+
+          <div className="reveal" style={{ animationDelay: `${heroAnimationDelays[6]}s`, color: 'rgba(255,255,255,0.58)', fontSize: '13px' }}>
+            Trusted by teams building safer media verification workflows.
+          </div>
+
+          <span id="detect" style={{ position: 'absolute', top: '-96px' }} aria-hidden="true"></span>
+        </section>
+      </main>
+
+      <section className="about-shell" id="about">
+        <div className="about-inner">
+          <div className="about-heading">
+            <h2 className="about-title">About VerifAI, built for trusted image verification.</h2>
+            <p className="about-lead">
+              VerifAI combines machine learning, credibility scoring, and clear visual inspection tools to help teams verify whether an image is authentic, manipulated, or AI-generated.
+            </p>
+          </div>
+
+          <div className="about-grid" id="features">
+            {aboutCards.map((card) => {
+              const Icon = card.icon;
+              return (
+                <article key={card.id} className="about-card">
+                  <div className="about-card-head">
+                    <span className="about-icon" aria-hidden="true">
+                      <Icon size={16} strokeWidth={2} />
+                    </span>
+                    <div>
+                      <h3 className="about-card-title">{card.title}</h3>
+                      <p className="about-card-subtitle">{card.subtitle}</p>
+                    </div>
+                  </div>
+
+                  <p className="about-card-body">{card.body}</p>
+
+                  <ul className="about-points">
+                    {card.points.map((point) => (
+                      <li key={`${card.id}-${point}`}>{point}</li>
+                    ))}
+                  </ul>
+
+                  <a href="#home" className="about-cta">{card.cta}</a>
+                </article>
+              );
+            })}
+          </div>
         </div>
       </section>
 
-      <section id="features" className="container mx-auto px-6 py-20">
-        <h3 className="text-4xl font-bold text-white text-center mb-12">Key Features</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
-          <div className="group bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 transition-all duration-300 feature-card">
-            <i className="fas fa-eye text-3xl text-blue-400 mb-4 transition-colors group-hover:text-[#48FF28]"></i>
-            <h4 className="text-xl font-semibold text-white mb-2">Visual Feature Extraction</h4>
-            <p className="text-gray-400">Identifies unique patterns and artifacts associated with AI-generated images</p>
+      <footer className="site-footer" id="footer">
+        <section className="footer-cta">
+          <h2 className="footer-cta-title">Start verifying with VerifAI.</h2>
+          <p className="footer-cta-text">
+            Machine learning image verification with confidence scoring and visual evidence review, built for teams that need trusted decisions.
+          </p>
+          <div className="footer-cta-actions">
+            <a className="footer-action primary" href="#home">Start Detection</a>
+            <a className="footer-action secondary" href="#about">Learn More</a>
           </div>
-          <div className="group bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 transition-all duration-300 feature-card">
-            <i className="fas fa-tachometer-alt text-3xl text-purple-400 mb-4 transition-colors group-hover:text-[#48FF28]"></i>
-            <h4 className="text-xl font-semibold text-white mb-2">Real-time Processing</h4>
-            <p className="text-gray-400">Get instant results with our optimized MT-YOLOv6 architecture</p>
-          </div>
-          <div className="group bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 transition-all duration-300 feature-card">
-            <i className="fas fa-percentage text-3xl text-green-400 mb-4 transition-colors group-hover:text-[#48FF28]"></i>
-            <h4 className="text-xl font-semibold text-white mb-2">Confidence Scoring</h4>
-            <p className="text-gray-400">Detailed confidence levels and credibility metrics for each analysis</p>
-          </div>
-          <div className="group bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 transition-all duration-300 feature-card">
-            <i className="fas fa-map-marked-alt text-3xl text-yellow-400 mb-4 transition-colors group-hover:text-[#48FF28]"></i>
-            <h4 className="text-xl font-semibold text-white mb-2">Visual Annotations</h4>
-            <p className="text-gray-400">Highlighted regions showing detected anomalies and AI patterns</p>
-          </div>
-          <div className="group bg-white/5 backdrop-blur-sm rounded-xl p-6 border border-white/10 transition-all duration-300 feature-card">
-            <i className="fas fa-lock text-3xl text-indigo-400 mb-4 transition-colors group-hover:text-[#48FF28]"></i>
-            <h4 className="text-xl font-semibold text-white mb-2">Privacy First</h4>
-            <p className="text-gray-400">Local processing ensures your images remain private and secure</p>
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <footer className="bg-black/50 backdrop-blur-sm border-t border-white/10 mt-12">
-        <div className="container mx-auto px-6 py-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div>
-              <div className="flex items-center space-x-3 mb-4">
-                <div className="w-9 h-9 hero-logo-badge rounded-full flex items-center justify-center">
-                  <i className="fas fa-shield-alt text-white text-sm"></i>
-                </div>
-                <h4 className="text-xl font-semibold tracking-wide text-white">VerifAI</h4>
+        <section className="footer-main">
+          <div className="footer-top">
+            <div className="footer-brand" aria-label="VerifAI brand">
+              <span className="footer-brand-mark" aria-hidden="true">
+                <Shield size={12} strokeWidth={2.2} />
+              </span>
+              <span>VerifAI</span>
+            </div>
+
+            <div className="footer-cols">
+              <div className="footer-col">
+                <h4>Technology</h4>
+                <ul>
+                  <li>MT-YOLOv6</li>
+                  <li>Machine Learning</li>
+                  <li>Computer Vision</li>
+                  <li>Deep Learning</li>
+                </ul>
               </div>
-              <p className="text-gray-400">AI Image Detection System powered by MT-YOLOv6</p>
-            </div>
-            <div>
-              <h5 className="text-white font-semibold mb-4">Quick Links</h5>
-              <ul className="space-y-2">
-                <li><a href="#home" className="text-gray-400 hover:text-white transition-colors">Home</a></li>
-                <li><a href="#about" className="text-gray-400 hover:text-white transition-colors">About</a></li>
-                <li><a href="#detect" className="text-gray-400 hover:text-white transition-colors">Detect</a></li>
-                <li><a href="#features" className="text-gray-400 hover:text-white transition-colors">Features</a></li>
-              </ul>
-            </div>
-            <div>
-              <h5 className="text-white font-semibold mb-4">Technology</h5>
-              <ul className="space-y-2">
-                <li><span className="text-gray-400">MT-YOLOv6</span></li>
-                <li><span className="text-gray-400">Machine Learning</span></li>
-                <li><span className="text-gray-400">Computer Vision</span></li>
-                <li><span className="text-gray-400">Deep Learning</span></li>
-              </ul>
-            </div>
-            <div>
-              <h5 className="text-white font-semibold mb-4">Team</h5>
-              <p className="text-gray-400 text-sm">Alviar, Justin James E.</p>
-              <p className="text-gray-400 text-sm">Arobie, Mohammad Rashdy L.</p>
-              <p className="text-gray-400 text-sm">Climaco, John Lloyd L.</p>
-              <p className="text-gray-400 text-sm">Mamiala, Denabhar</p>
-              <p className="text-gray-400 text-sm">Lagoyo, Shadia</p>
+
+              <div className="footer-col">
+                <h4>Team</h4>
+                <ul>
+                  <li>Alviar, Justin James E.</li>
+                  <li>Arobi, Rashdy</li>
+                  <li>Climaco, John Lloyd L.</li>
+                  <li>Mamiala, Denabhar</li>
+                  <li>Lagoyo, Shadia</li>
+                </ul>
+              </div>
             </div>
           </div>
-          <div className="border-t border-white/10 mt-6 pt-6 text-center">
-            <p className="text-gray-400">© 2026 VerifAI. IT 322 - Machine Learning Project. WMSU College of Computing Studies</p>
-          </div>
-        </div>
+
+          <div className="footer-bottom">© 2026 VerifAI. IT 322 - Machine Learning Project. WMSU College of Computing Studies</div>
+        </section>
       </footer>
-
-      <div className="fixed top-5 right-5 space-y-3 z-50">
-        {notifications.map((n) => (
-          <Notification key={n.id} message={n.message} type={n.type} />
-        ))}
-      </div>
-      </div>
-    </>
+      </>
+      )}
+    </div>
   );
 }
 

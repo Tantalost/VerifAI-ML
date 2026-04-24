@@ -145,8 +145,8 @@ const fragmentShader = `
 `;
 
 export default function LightPillar({
-  topColor = '#48FF28',
-  bottomColor = '#9EF19E',
+  topColor = '#f2f1ed',
+  bottomColor = '#e6e5e0',
   intensity = 1.0,
   rotationSpeed = 0.3,
   interactive = false,

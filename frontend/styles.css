@@ -1,4 +1,9 @@
 /* Custom animations and styles */
+body {
+    background: linear-gradient(145deg, #26251e 0%, #e6e5e0 62%, #f2f1ed 100%);
+    background-attachment: fixed;
+}
+
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(20px); }
     to { opacity: 1; transform: translateY(0); }
