@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Shield, Zap, CheckCircle, BrainCircuit, BarChart3, Gauge, Lock, ScanSearch, MapPinned, Plus, History, Link2, ChevronDown, Plane, ImagePlus, Images, Search, BarChart2, PieChart, Activity, Sparkles } from 'lucide-react';
+import { ArrowLeft, Shield, Zap, CheckCircle, BrainCircuit, BarChart3, Gauge, Lock, ScanSearch, MapPinned, Plus, History, Link2, ChevronDown, Plane, ImagePlus, Images, Search, BarChart2, PieChart, Activity, Sparkles } from 'lucide-react';
 import Orb from './components/Orb';
 
 const terminals = [
@@ -152,10 +152,49 @@ function classifyLine(line) {
   return 'default';
 }
 
+function hashString(value) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function clampNumber(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function createDetectionMetrics(seed, index, mode) {
+  const hash = hashString(`${seed}:${index}:${mode}`);
+  const aiShare = 32 + (hash % 64);
+  const confidence = clampNumber(aiShare + ((hash >> 3) % 14) - 4, 45, 99);
+  const artifacts = clampNumber(100 - aiShare + ((hash >> 5) % 12) - 3, 8, 96);
+
+  return {
+    confidence,
+    aiShare,
+    artifacts,
+  };
+}
+
+function buildDetections(images, mode) {
+  const detections = images.map((image, index) => ({
+    ...image,
+    ...createDetectionMetrics(image.name, index, mode),
+  }));
+
+  return mode === 'batch'
+    ? [...detections].sort((left, right) => right.aiShare - left.aiShare)
+    : detections;
+}
+
 function App() {
   const [currentView, setCurrentView] = useState(() => {
     if (typeof window === 'undefined') return null;
     if (window.location.hash === '#app') return 'app';
+    if (window.location.hash === '#single') return 'single';
+    if (window.location.hash === '#batch') return 'batch';
+    if (window.location.hash === '#history') return 'history';
     if (window.location.hash === '#signup') return 'signup';
     if (window.location.hash === '#login') return 'login';
     return null;
@@ -163,11 +202,19 @@ function App() {
   const [scanMode, setScanMode] = useState('single');
   const [selectedImages, setSelectedImages] = useState([]);
   const [hasScanned, setHasScanned] = useState(false);
-  const [showDetectFlow, setShowDetectFlow] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanHistory, setScanHistory] = useState([]);
+  const [historyTab, setHistoryTab] = useState('single');
+  const [authForm, setAuthForm] = useState({
+    fullName: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+  });
+  const [authError, setAuthError] = useState('');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const accountMenuRef = useRef(null);
-  const modeMenuRef = useRef(null);
+  const scanTimerRef = useRef(null);
 
   useEffect(() => {
     const handleMouseMove = (event) => {
@@ -183,6 +230,18 @@ function App() {
     const syncRouteState = () => {
       if (window.location.hash === '#app') {
         setCurrentView('app');
+        return;
+      }
+      if (window.location.hash === '#single') {
+        setCurrentView('single');
+        return;
+      }
+      if (window.location.hash === '#batch') {
+        setCurrentView('batch');
+        return;
+      }
+      if (window.location.hash === '#history') {
+        setCurrentView('history');
         return;
       }
       if (window.location.hash === '#signup') {
@@ -202,12 +261,33 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (currentView !== 'single' && currentView !== 'batch') {
+      return;
+    }
+
+    if (scanTimerRef.current) {
+      clearTimeout(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
+
+    setScanMode(currentView);
+    setSelectedImages([]);
+    setHasScanned(false);
+    setIsScanning(false);
+  }, [currentView]);
+
+  useEffect(() => {
+    return () => {
+      if (scanTimerRef.current) {
+        clearTimeout(scanTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     const handlePointerDown = (event) => {
       if (accountMenuRef.current && !accountMenuRef.current.contains(event.target)) {
         setAccountMenuOpen(false);
-      }
-      if (modeMenuRef.current && !modeMenuRef.current.contains(event.target)) {
-        setModeMenuOpen(false);
       }
     };
 
@@ -217,40 +297,92 @@ function App() {
 
   const goToLoginPage = (event) => {
     event.preventDefault();
+    setAuthError('');
     window.location.hash = 'login';
   };
 
   const goToSignupPage = (event) => {
     event.preventDefault();
+    setAuthError('');
     window.location.hash = 'signup';
   };
 
   const goToAppPage = () => {
-    setShowDetectFlow(false);
+    if (scanTimerRef.current) {
+      clearTimeout(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
     setSelectedImages([]);
     setHasScanned(false);
+    setIsScanning(false);
     setAccountMenuOpen(false);
-    setModeMenuOpen(false);
     window.location.hash = 'app';
   };
 
+  const goToSinglePage = (event) => {
+    if (event) event.preventDefault();
+    window.location.hash = 'single';
+  };
+
+  const goToBatchPage = (event) => {
+    if (event) event.preventDefault();
+    window.location.hash = 'batch';
+  };
+
+  const goToHistoryPage = (event, tab = historyTab) => {
+    if (event) event.preventDefault();
+    setHistoryTab(tab);
+    window.location.hash = 'history';
+  };
+
   const closeAuthPage = () => {
+    setAuthError('');
     window.location.hash = 'home';
+  };
+
+  const onAuthInputChange = (event) => {
+    const { name, value } = event.target;
+    setAuthForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const onAuthSubmit = (event) => {
+    event.preventDefault();
+
+    const email = authForm.email.trim();
+    const password = authForm.password;
+    const fullName = authForm.fullName.trim();
+    const confirmPassword = authForm.confirmPassword;
+
+    if (currentView === 'signup') {
+      if (!fullName || !email || !password || !confirmPassword) {
+        setAuthError('Please fill in all sign up fields before continuing.');
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        setAuthError('Passwords do not match.');
+        return;
+      }
+    } else {
+      if (!email || !password) {
+        setAuthError('Please enter your email and password before continuing.');
+        return;
+      }
+    }
+
+    setAuthError('');
+    goToAppPage();
   };
 
   const toggleAccountMenu = () => {
     setAccountMenuOpen((value) => !value);
   };
 
-  const toggleModeMenu = () => {
-    setModeMenuOpen((value) => !value);
-  };
-
-  const selectScanMode = (mode) => {
-    setScanMode(mode);
-    setSelectedImages([]);
-    setHasScanned(false);
-    setModeMenuOpen(false);
+  const startNewDetection = () => {
+    goToAppPage();
   };
 
   const signOut = () => {
@@ -273,9 +405,56 @@ function App() {
   };
 
   const runScan = () => {
-    if (selectedImages.length === 0) return;
-    setHasScanned(true);
+    if (selectedImages.length === 0 || isScanning) return;
+
+    if (scanTimerRef.current) {
+      clearTimeout(scanTimerRef.current);
+    }
+
+    const mode = scanMode;
+    const inputSnapshot = selectedImages;
+
+    setIsScanning(true);
+    setHasScanned(false);
+
+    scanTimerRef.current = setTimeout(() => {
+      const detections = buildDetections(inputSnapshot, mode);
+
+      setHasScanned(true);
+      setIsScanning(false);
+      setScanHistory((previous) => [
+        {
+          id: Date.now(),
+          scannedAt: new Date().toLocaleString(),
+          mode,
+          detections,
+        },
+        ...previous,
+      ].slice(0, 50));
+      scanTimerRef.current = null;
+    }, 1400);
   };
+
+  const activeDetections = useMemo(() => {
+    if (!hasScanned || selectedImages.length === 0) {
+      return [];
+    }
+
+    return buildDetections(selectedImages, scanMode);
+  }, [hasScanned, selectedImages, scanMode]);
+
+  const latestScansForCurrentMode = useMemo(() => {
+    return scanHistory
+      .filter((entry) => entry.mode === scanMode)
+      .slice(0, 5);
+  }, [scanHistory, scanMode]);
+
+  const filteredHistory = useMemo(() => {
+    return scanHistory.filter((entry) => entry.mode === historyTab);
+  }, [scanHistory, historyTab]);
+
+  const isDetectionPage = currentView === 'single' || currentView === 'batch';
+  const currentModeLabel = scanMode === 'batch' ? 'Batch Detection' : 'Single Detection';
 
   const embeddedStyles = useMemo(
     () => `
@@ -1037,7 +1216,25 @@ function App() {
         margin-top: 1.15rem;
         width: 100%;
         height: 44px;
-        border-radius: 7px;
+      .latest-mode-strip {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+      }
+
+      .view-more-btn {
+        margin-top: 0.75rem;
+        height: 36px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 107, 0, 0.4);
+        background: rgba(255, 107, 0, 0.12);
+        color: rgba(255, 255, 255, 0.93);
+        padding: 0 0.8rem;
+        cursor: pointer;
+        font-weight: 600;
+      }
+
+      .view-more-btn:hover {
+        background: rgba(255, 107, 0, 0.2);
+      }
         border: 1px solid rgba(255, 107, 0, 0.28);
         background: rgba(255, 107, 0, 0.06);
         color: rgba(255, 255, 255, 0.95);
@@ -1133,34 +1330,318 @@ function App() {
         position: relative;
       }
 
+      .history-page {
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 50% 30%, rgba(255, 107, 0, 0.1) 0%, rgba(255, 107, 0, 0) 34%),
+          #000;
+        padding: 1.5rem 1.5rem 2rem 6rem;
+      }
+
+      .history-hero {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1rem;
+      }
+
+      .history-hero h2 {
+        margin: 0;
+        font-size: clamp(1.6rem, 2.4vw, 2.6rem);
+        color: rgba(255, 255, 255, 0.96);
+      }
+
+      .history-hero p {
+        margin: 0.4rem 0 0;
+        color: rgba(255, 255, 255, 0.64);
+        max-width: 720px;
+        line-height: 1.5;
+      }
+
+      .history-back {
+        border: 1px solid rgba(255, 107, 0, 0.28);
+        background: rgba(255, 107, 0, 0.08);
+        color: rgba(255, 255, 255, 0.95);
+        border-radius: 999px;
+        height: 40px;
+        padding: 0 1rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.55rem;
+        cursor: pointer;
+      }
+
+      .history-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+      }
+
+      .history-card {
+        border: 1px solid rgba(255, 255, 255, 0.11);
+        border-radius: 18px;
+        background: rgba(15, 15, 15, 0.9);
+        padding: 1rem;
+        box-shadow: 0 18px 34px rgba(0, 0, 0, 0.34);
+      }
+
+      .history-card-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 0.9rem;
+      }
+
+      .history-card-head h3 {
+        margin: 0;
+        font-size: 1rem;
+        color: rgba(255, 255, 255, 0.95);
+      }
+
+      .history-card-head p {
+        margin: 0.3rem 0 0;
+        color: rgba(255, 255, 255, 0.58);
+        font-size: 0.82rem;
+      }
+
+      .history-badge {
+        border-radius: 999px;
+        border: 1px solid rgba(255, 107, 0, 0.26);
+        color: #ffb07a;
+        background: rgba(255, 107, 0, 0.08);
+        font-size: 0.75rem;
+        padding: 0.35rem 0.7rem;
+        white-space: nowrap;
+      }
+
+      .history-previews {
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+        gap: 0.8rem;
+      }
+
+      .history-main-image {
+        min-height: 220px;
+        border-radius: 14px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.11);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .history-main-image img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .history-mini-strip {
+        display: grid;
+        gap: 0.55rem;
+      }
+
+      .history-mini {
+        min-height: 68px;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.11);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .history-mini img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .history-graph {
+        margin-top: 0.9rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        padding-top: 0.9rem;
+      }
+
+      .history-graph-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.65rem;
+      }
+
+      .history-graph-title span {
+        color: rgba(255, 255, 255, 0.86);
+        font-size: 0.85rem;
+        font-weight: 600;
+      }
+
+      .history-graph-title em {
+        color: rgba(255, 255, 255, 0.58);
+        font-style: normal;
+        font-size: 0.78rem;
+      }
+
+      .history-graph-list {
+        display: grid;
+        gap: 0.55rem;
+      }
+
+      .history-graph-row {
+        display: grid;
+        grid-template-columns: 120px 1fr 52px;
+        gap: 0.6rem;
+        align-items: center;
+        color: rgba(255, 255, 255, 0.78);
+        font-size: 0.8rem;
+      }
+
+      .history-graph-bar {
+        height: 9px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+      }
+
+      .history-graph-bar span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #ff6b00, #ff9e61);
+      }
+
+      .history-empty {
+        border: 1px dashed rgba(255, 255, 255, 0.16);
+        border-radius: 18px;
+        padding: 2rem;
+        text-align: center;
+        color: rgba(255, 255, 255, 0.62);
+        background: rgba(255, 255, 255, 0.02);
+      }
+
       .app-sidebar {
         position: fixed;
         left: 0;
         top: 0;
         bottom: 0;
-        width: 36px;
+        width: 54px;
         border-right: 1px solid rgba(255, 255, 255, 0.1);
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 1rem;
-        padding-top: 0.8rem;
-        background: rgba(0, 0, 0, 0.5);
+        gap: 0.7rem;
+        padding-top: 0.85rem;
+        background: rgba(0, 0, 0, 0.62);
+        z-index: 40;
+      }
+
+      .app-side-item {
+        position: relative;
+        display: inline-flex;
       }
 
       .app-side-dot {
-        width: 18px;
-        height: 18px;
+        width: 30px;
+        height: 30px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
         color: rgba(255, 255, 255, 0.74);
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.04);
+        transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+        cursor: pointer;
+      }
+
+      .app-side-dot:hover,
+      .app-side-item:focus-within .app-side-dot {
+        color: rgba(255, 255, 255, 0.95);
+        border-color: rgba(255, 107, 0, 0.4);
+        background: rgba(255, 107, 0, 0.12);
+      }
+
+      .app-side-pop {
+        position: absolute;
+        left: calc(100% + 10px);
+        top: -2px;
+        width: 240px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(30, 31, 38, 0.96);
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+        padding: 0.85rem;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(6px);
+        transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+        pointer-events: none;
+      }
+
+      .app-side-item:hover .app-side-pop,
+      .app-side-item:focus-within .app-side-pop {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+      }
+
+      .app-side-pop h5 {
+        margin: 0;
+        font-size: 0.96rem;
+        color: rgba(255, 255, 255, 0.95);
+      }
+
+      .app-side-pop p {
+        margin: 0.55rem 0 0;
+        font-size: 0.8rem;
+        color: rgba(255, 255, 255, 0.62);
+        line-height: 1.45;
+      }
+
+      .app-history-list {
+        margin: 0.55rem 0 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 0.45rem;
+        max-height: 168px;
+        overflow-y: auto;
+      }
+
+      .app-history-item {
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.03);
+        padding: 0.5rem 0.55rem;
+      }
+
+      .app-history-item strong {
+        display: block;
+        font-size: 0.75rem;
+        color: rgba(255, 255, 255, 0.92);
+      }
+
+      .app-history-item span {
+        display: block;
+        margin-top: 0.2rem;
+        font-size: 0.72rem;
+        color: rgba(255, 255, 255, 0.63);
+      }
+
+      .app-side-pop .see-all {
+        margin-top: 0.55rem;
+        border: none;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.76);
+        font-size: 0.8rem;
+        padding: 0;
+        cursor: pointer;
       }
 
       .app-top {
         height: 40px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-        margin-left: 36px;
+        margin-left: 54px;
         display: flex;
         align-items: center;
         justify-content: flex-end;
@@ -1245,7 +1726,7 @@ function App() {
       }
 
       .app-main {
-        margin-left: 36px;
+        margin-left: 54px;
         min-height: calc(100vh - 40px);
         display: flex;
         align-items: center;
@@ -1275,6 +1756,31 @@ function App() {
         z-index: 1;
       }
 
+      .detect-split-menu {
+        border: 1px solid rgba(255, 255, 255, 0.13);
+        border-radius: 18px;
+        padding: 1.1rem;
+        background: rgba(9, 9, 9, 0.84);
+      }
+
+      .detect-split-menu h2 {
+        margin: 0;
+        font-size: 1.2rem;
+      }
+
+      .detect-split-menu p {
+        margin: 0.45rem 0 0;
+        color: rgba(255, 255, 255, 0.67);
+        font-size: 0.88rem;
+      }
+
+      .detect-split-actions {
+        margin-top: 1rem;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.6rem;
+      }
+
       .detect-logo {
         display: flex;
         align-items: center;
@@ -1298,7 +1804,7 @@ function App() {
         background: rgba(17, 17, 17, 0.9);
         padding: 0.6rem;
         display: grid;
-        grid-template-columns: 1fr auto auto;
+        grid-template-columns: 1fr auto;
         gap: 0.5rem;
         align-items: center;
         overflow: visible;
@@ -1317,8 +1823,49 @@ function App() {
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        gap: 0.45rem;
         margin-left: auto;
         margin-right: auto;
+      }
+
+      .detect-split-actions .detect-start-btn {
+        width: 100%;
+        margin: 0;
+      }
+
+      .history-tabs {
+        display: inline-flex;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.03);
+        padding: 0.2rem;
+        margin-bottom: 0.9rem;
+      }
+
+      .history-tab {
+        border: none;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.7);
+        height: 34px;
+        min-width: 86px;
+        border-radius: 999px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+      }
+
+      .history-tab.active {
+        background: rgba(255, 107, 0, 0.16);
+        color: rgba(255, 255, 255, 0.95);
+      }
+
+      .history-tab:hover {
+        transform: translateY(-1px);
+      }
+
+      .history-content {
+        animation: historyContentIn 0.28s ease;
+        transform-origin: top center;
       }
 
       .detect-uploader {
@@ -1423,6 +1970,82 @@ function App() {
         color: #0e0e0e;
       }
 
+      .detect-scan:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+
+      .scan-loading {
+        margin-top: 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 14px;
+        background: rgba(10, 10, 10, 0.85);
+        padding: 1rem;
+        text-align: center;
+      }
+
+      .scan-loading h4 {
+        margin: 0.45rem 0 0;
+      }
+
+      .scan-loading p {
+        margin: 0.4rem 0 0;
+        color: rgba(255, 255, 255, 0.64);
+        font-size: 0.83rem;
+      }
+
+      .scan-loading-spinner {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        border: 3px solid rgba(255, 255, 255, 0.15);
+        border-top-color: #ff6b00;
+        margin: 0 auto;
+        animation: spinLoader 0.95s linear infinite;
+      }
+
+      .scan-loading-bars {
+        margin-top: 0.7rem;
+        display: grid;
+        gap: 0.35rem;
+      }
+
+      .scan-loading-bars span {
+        display: block;
+        height: 8px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(255, 107, 0, 0.2), rgba(255, 107, 0, 0.9));
+        animation: pulseBar 1.2s ease-in-out infinite;
+      }
+
+      .scan-loading-bars span:nth-child(2) {
+        animation-delay: 0.16s;
+      }
+
+      .scan-loading-bars span:nth-child(3) {
+        animation-delay: 0.32s;
+      }
+
+      .latest-preview {
+        margin-top: 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.11);
+        border-radius: 12px;
+        background: rgba(10, 10, 10, 0.78);
+        padding: 0.8rem;
+        text-align: left;
+      }
+
+      .latest-preview h4 {
+        margin: 0;
+        font-size: 0.9rem;
+      }
+
+      .latest-preview p {
+        margin: 0.45rem 0 0;
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 0.8rem;
+      }
+
       .preview-strip {
         margin-top: 1rem;
         display: grid;
@@ -1453,10 +2076,11 @@ function App() {
         text-align: left;
       }
 
-      .scan-grid {
+      .scan-detection-grid,
+      .history-detection-grid {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 0.7rem;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 0.75rem;
       }
 
       .scan-card {
@@ -1464,6 +2088,27 @@ function App() {
         border-radius: 10px;
         padding: 0.72rem;
         background: rgba(255, 255, 255, 0.02);
+      }
+
+      .detection-card {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .detection-thumb {
+        height: 156px;
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.03);
+        margin-bottom: 0.7rem;
+      }
+
+      .detection-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
       }
 
       .scan-card h4 {
@@ -1475,16 +2120,32 @@ function App() {
         gap: 0.4rem;
       }
 
+      .detection-meta {
+        margin-top: 0.45rem;
+        font-size: 0.8rem;
+        color: rgba(255, 255, 255, 0.62);
+      }
+
+      .graph-metrics {
+        margin-top: 0.7rem;
+        display: grid;
+        gap: 0.45rem;
+      }
+
+      .graph-metric {
+        display: grid;
+        gap: 0.24rem;
+      }
+
+      .graph-metric-label {
+        color: rgba(255, 255, 255, 0.74);
+        font-size: 0.76rem;
+      }
+
       .scan-stat {
         margin-top: 0.56rem;
         font-size: 1.35rem;
         font-weight: 800;
-      }
-
-      .graph-bars {
-        margin-top: 0.58rem;
-        display: grid;
-        gap: 0.34rem;
       }
 
       .graph-bar {
@@ -1538,6 +2199,26 @@ function App() {
       @keyframes scanSweep {
         0% { transform: translateY(-110%); }
         100% { transform: translateY(120%); }
+      }
+
+      @keyframes spinLoader {
+        to { transform: rotate(360deg); }
+      }
+
+      @keyframes pulseBar {
+        0%, 100% { opacity: 0.42; transform: scaleX(0.88); }
+        50% { opacity: 1; transform: scaleX(1); }
+      }
+
+      @keyframes historyContentIn {
+        from {
+          opacity: 0;
+          transform: translateY(8px) scale(0.995);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
       }
 
       @media (max-width: 1080px) {
@@ -1689,6 +2370,10 @@ function App() {
           grid-template-columns: 1fr;
         }
 
+        .detect-split-actions {
+          grid-template-columns: 1fr;
+        }
+
         .detect-panel {
           grid-template-columns: 1fr;
           border-radius: 16px;
@@ -1725,13 +2410,47 @@ function App() {
     <div className="page">
       <style>{embeddedStyles}</style>
 
-      {currentView === 'app' ? (
+      {currentView === 'app' || isDetectionPage ? (
         <section className="app-shell" id="app">
           <aside className="app-sidebar" aria-label="App quick actions">
-            <span className="app-side-dot"><Shield size={12} /></span>
-            <span className="app-side-dot"><Plus size={12} /></span>
-            <span className="app-side-dot"><History size={12} /></span>
-            <span className="app-side-dot"><Link2 size={12} /></span>
+            <span className="app-side-dot" aria-hidden="true"><Shield size={12} /></span>
+
+            <div className="app-side-item">
+              <button type="button" className="app-side-dot" onClick={startNewDetection} aria-label="New detection">
+                <Plus size={13} />
+              </button>
+              <div className="app-side-pop" role="status" aria-live="polite">
+                <h5>New Detection</h5>
+                <p>Start a new image check and upload files for AI detection.</p>
+              </div>
+            </div>
+
+            <div className="app-side-item">
+              <button type="button" className="app-side-dot" onClick={(event) => goToHistoryPage(event, scanMode)} aria-label="Detection history">
+                <History size={13} />
+              </button>
+              <div className="app-side-pop" role="status" aria-live="polite">
+                <h5>History</h5>
+                {scanHistory.length === 0 ? (
+                  <p>No detection history yet</p>
+                ) : (
+                  <ul className="app-history-list">
+                    {scanHistory.map((entry) => (
+                      <li className="app-history-item" key={entry.id}>
+                        <strong>{entry.mode === 'single' ? 'Single Image' : 'Batch Image'} • {entry.detections.length} file(s)</strong>
+                        <span>{entry.detections[0]?.name}</span>
+                        <span>{entry.scannedAt}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <button type="button" className="see-all" onClick={(event) => goToHistoryPage(event, scanMode)}>See all</button>
+              </div>
+            </div>
+
+            <button type="button" className="app-side-dot" onClick={goToBatchPage} aria-label="Batch detection">
+              <Link2 size={12} />
+            </button>
           </aside>
 
           <header className="app-top">
@@ -1763,7 +2482,7 @@ function App() {
           <main className="app-main">
             <div className="app-orb-wrap" aria-hidden="true">
               <Orb
-                hue={24}
+                hue={0}
                 hoverIntensity={0.32}
                 rotateOnHover={false}
                 forceHoverState={true}
@@ -1772,110 +2491,217 @@ function App() {
             </div>
 
             <section className="detect-center">
-              <div className="detect-logo">
-                <span className="footer-brand-mark" aria-hidden="true">
-                  <Shield size={12} strokeWidth={2.2} />
-                </span>
-                <span>VERIFAI AI</span>
-              </div>
-
-              {!showDetectFlow ? (
-                <button type="button" className="detect-start-btn" onClick={() => setShowDetectFlow(true)}>
-                  Open Detection
-                </button>
+              {currentView === 'app' ? (
+                <div className="detect-split-menu">
+                  <h2>Choose Detection Page</h2>
+                  <p>Use dedicated pages for cleaner workflows: single image or batch image scanning.</p>
+                  <div className="detect-split-actions">
+                    <button type="button" className="detect-start-btn" onClick={goToSinglePage}>
+                      <ImagePlus size={16} />
+                      Open Single Detection
+                    </button>
+                    <button type="button" className="detect-start-btn" onClick={goToBatchPage}>
+                      <Images size={16} />
+                      Open Batch Detection
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <>
+                  <div className="detect-logo">
+                    <span className="footer-brand-mark" aria-hidden="true">
+                      <Shield size={12} strokeWidth={2.2} />
+                    </span>
+                    <span>{currentModeLabel}</span>
+                  </div>
+
                   <div className="detect-panel">
                     <label className="detect-uploader">
                       {scanMode === 'single' ? <ImagePlus size={16} /> : <Images size={16} />}
-                      <span>{selectedImages.length > 0 ? `${selectedImages.length} image(s) selected` : 'Upload image(s) for detection'}</span>
+                      <span>{selectedImages.length > 0 ? `${selectedImages.length} image(s) selected` : `Upload image(s) for ${scanMode} detection`}</span>
                       <input type="file" accept="image/*" multiple={scanMode === 'batch'} onChange={onUploadImages} />
                     </label>
 
-                    <div className="detect-mode" ref={modeMenuRef}>
-                      <button type="button" onClick={toggleModeMenu} style={{ all: 'unset', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', width: '100%', cursor: 'pointer' }}>
-                        <span>{scanMode === 'single' ? 'Single Image' : 'Batch Image'}</span>
-                        <ChevronDown size={14} />
-                      </button>
-
-                      {modeMenuOpen && (
-                        <div className="detect-mode-menu" role="menu" aria-label="Detection mode options">
-                          <button type="button" className={`detect-mode-option ${scanMode === 'single' ? 'active' : ''}`} onClick={() => selectScanMode('single')}>
-                            <span className="detect-mode-option-left">
-                              <span className="detect-mode-option-icon"><ImagePlus size={14} /></span>
-                              <span>Single Image</span>
-                            </span>
-                            <span>1</span>
-                          </button>
-                          <button type="button" className={`detect-mode-option ${scanMode === 'batch' ? 'active' : ''}`} onClick={() => selectScanMode('batch')}>
-                            <span className="detect-mode-option-left">
-                              <span className="detect-mode-option-icon"><Images size={14} /></span>
-                              <span>Batch Image</span>
-                            </span>
-                            <span>8</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    <button className="detect-scan" type="button" onClick={runScan} aria-label="Scan images">
+                    <button className="detect-scan" type="button" onClick={runScan} disabled={isScanning} aria-label="Scan images">
                       <Plane size={16} />
                     </button>
                   </div>
-                </>
-              )}
 
-              {selectedImages.length > 0 && (
-                <div className="preview-strip">
-                  {selectedImages.map((item) => (
-                    <div className="preview-item" key={item.preview}>
-                      <img src={item.preview} alt={item.name} />
+                  {selectedImages.length > 0 && (
+                    <div className="preview-strip">
+                      {selectedImages.map((item) => (
+                        <div className="preview-item" key={item.preview}>
+                          <img src={item.preview} alt={item.name} />
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
+                  )}
 
-              {hasScanned && (
-                <section className="scan-results">
-                  <div className="scan-grid">
-                    <article className="scan-card">
-                      <h4><BarChart2 size={14} /> Detection Confidence</h4>
-                      <div className="scan-stat">94.7%</div>
-                      <div className="graph-bars">
-                        <div className="graph-bar"><span style={{ width: '95%' }}></span></div>
-                        <div className="graph-bar"><span style={{ width: '78%' }}></span></div>
-                        <div className="graph-bar"><span style={{ width: '66%' }}></span></div>
+                  {isScanning && (
+                    <section className="scan-loading" aria-live="polite">
+                      <div className="scan-loading-spinner"></div>
+                      <h4>Scanning in progress...</h4>
+                      <p>Analyzing image details and generating graphs for each image.</p>
+                      <div className="scan-loading-bars">
+                        <span></span>
+                        <span></span>
+                        <span></span>
                       </div>
-                    </article>
+                    </section>
+                  )}
 
-                    <article className="scan-card">
-                      <h4><PieChart size={14} /> Classification Split</h4>
-                      <div className="scan-stat">AI: 62%</div>
-                      <div className="graph-bars">
-                        <div className="graph-bar"><span style={{ width: '62%' }}></span></div>
-                        <div className="graph-bar"><span style={{ width: '38%' }}></span></div>
+                  {hasScanned && !isScanning && (
+                    <section className="scan-results">
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '0.85rem', color: 'rgba(255,255,255,0.74)', fontSize: '0.84rem' }}>
+                        <span>
+                          <Sparkles size={13} style={{ verticalAlign: 'middle', marginRight: '0.35rem' }} />
+                          {scanMode === 'batch' ? 'Batch analysis sorted from highest AI to lowest AI.' : 'Single image analysis complete.'}
+                        </span>
+                        <span>{activeDetections.length} result(s)</span>
                       </div>
-                    </article>
 
-                    <article className="scan-card">
-                      <h4><Activity size={14} /> Artifact Activity</h4>
-                      <div className="scan-stat">High</div>
-                      <div className="graph-bars">
-                        <div className="graph-bar"><span style={{ width: '88%' }}></span></div>
-                        <div className="graph-bar"><span style={{ width: '80%' }}></span></div>
-                        <div className="graph-bar"><span style={{ width: '71%' }}></span></div>
+                      <div className="scan-detection-grid">
+                        {activeDetections.map((image, index) => (
+                          <article className="scan-card detection-card" key={image.preview}>
+                            <div className="detection-thumb">
+                              <img src={image.preview} alt={image.name} />
+                            </div>
+                            <h4><ScanSearch size={14} /> {image.name}</h4>
+                            <div className="detection-meta">Rank #{index + 1} • AI {image.aiShare}% • Confidence {image.confidence}%</div>
+
+                            <div className="graph-metrics">
+                              <div className="graph-metric">
+                                <span className="graph-metric-label">Confidence</span>
+                                <div className="graph-bar"><span style={{ width: `${image.confidence}%` }}></span></div>
+                              </div>
+                              <div className="graph-metric">
+                                <span className="graph-metric-label">AI likelihood</span>
+                                <div className="graph-bar"><span style={{ width: `${image.aiShare}%` }}></span></div>
+                              </div>
+                              <div className="graph-metric">
+                                <span className="graph-metric-label">Artifacts</span>
+                                <div className="graph-bar"><span style={{ width: `${image.artifacts}%` }}></span></div>
+                              </div>
+                            </div>
+                          </article>
+                        ))}
                       </div>
-                    </article>
-                  </div>
+                    </section>
+                  )}
 
-                  <div style={{ marginTop: '0.75rem', color: 'rgba(255,255,255,0.78)', fontSize: '0.86rem' }}>
-                    <Sparkles size={13} style={{ verticalAlign: 'middle', marginRight: '0.35rem' }} />
-                    Scan complete: image artifacts and metadata patterns were analyzed successfully.
-                  </div>
-                </section>
+                  <section className="latest-preview">
+                    <h4>Latest Scanned Preview ({currentModeLabel})</h4>
+                    {latestScansForCurrentMode.length === 0 ? (
+                      <p>No latest scan yet for this page.</p>
+                    ) : (
+                      <div className="preview-strip latest-mode-strip">
+                        {latestScansForCurrentMode.map((entry) => (
+                          <div className="preview-item" key={entry.id}>
+                            <img src={entry.detections[0]?.preview} alt={entry.detections[0]?.name || 'Latest scan'} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      className="view-more-btn"
+                      onClick={(event) => goToHistoryPage(event, scanMode)}
+                    >
+                      View More
+                    </button>
+                  </section>
+                </>
               )}
             </section>
           </main>
+        </section>
+      ) : currentView === 'history' ? (
+        <section className="history-page" id="history">
+          <div className="history-hero">
+            <div>
+              <h2>Detection History</h2>
+              <p>Review previous image detections by tab. Switch between Single and Batch to see separated scan histories.</p>
+            </div>
+            <button type="button" className="history-back" onClick={goToAppPage}>
+              <ArrowLeft size={14} />
+              Back to detection
+            </button>
+          </div>
+
+          <div className="history-tabs" role="tablist" aria-label="History type tabs">
+            <button
+              type="button"
+              className={`history-tab ${historyTab === 'single' ? 'active' : ''}`}
+              role="tab"
+              aria-selected={historyTab === 'single'}
+              onClick={() => setHistoryTab('single')}
+            >
+              Single
+            </button>
+            <button
+              type="button"
+              className={`history-tab ${historyTab === 'batch' ? 'active' : ''}`}
+              role="tab"
+              aria-selected={historyTab === 'batch'}
+              onClick={() => setHistoryTab('batch')}
+            >
+              Batch
+            </button>
+          </div>
+
+          <div key={historyTab} className="history-content">
+            {filteredHistory.length === 0 ? (
+              <div className="history-empty">
+                No {historyTab} detections yet. Run a {historyTab} scan first.
+              </div>
+            ) : (
+              <div className="history-grid">
+                {filteredHistory.map((entry) => (
+                  <article className="history-card" key={entry.id}>
+                    <div className="history-card-head">
+                      <div>
+                        <h3>{entry.mode === 'single' ? 'Single Image Scan' : 'Batch Scan'}</h3>
+                        <p>{entry.scannedAt}</p>
+                      </div>
+                      <span className="history-badge">{entry.detections.length} image(s)</span>
+                    </div>
+
+                    <div style={{ marginBottom: '0.75rem', color: 'rgba(255,255,255,0.64)', fontSize: '0.8rem' }}>
+                      {entry.mode === 'batch' ? 'Sorted from highest AI percent to lowest AI percent.' : 'Single image result.'}
+                    </div>
+
+                    <div className="history-detection-grid">
+                      {entry.detections.map((image, index) => (
+                        <article className="scan-card detection-card" key={image.preview}>
+                          <div className="detection-thumb">
+                            <img src={image.preview} alt={image.name} />
+                          </div>
+                          <h4><ScanSearch size={14} /> {image.name}</h4>
+                          <div className="detection-meta">Rank #{index + 1} • AI {image.aiShare}% • Confidence {image.confidence}%</div>
+
+                          <div className="graph-metrics">
+                            <div className="graph-metric">
+                              <span className="graph-metric-label">Confidence</span>
+                              <div className="graph-bar"><span style={{ width: `${image.confidence}%` }}></span></div>
+                            </div>
+                            <div className="graph-metric">
+                              <span className="graph-metric-label">AI likelihood</span>
+                              <div className="graph-bar"><span style={{ width: `${image.aiShare}%` }}></span></div>
+                            </div>
+                            <div className="graph-metric">
+                              <span className="graph-metric-label">Artifacts</span>
+                              <div className="graph-bar"><span style={{ width: `${image.artifacts}%` }}></span></div>
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
         </section>
       ) : currentView === 'login' || currentView === 'signup' ? (
         <section className="login-page" id="login">
@@ -1896,22 +2722,62 @@ function App() {
 
             <div className="login-divider">OR</div>
 
-            {currentView === 'signup' && (
-              <input className="login-input" type="text" placeholder="Enter your full name" />
-            )}
-            <input className="login-input" type="email" placeholder="Enter your email address" />
-            <input className="login-input" type="password" placeholder="Enter password" />
-            {currentView === 'signup' && (
-              <input className="login-input" type="password" placeholder="Confirm password" />
-            )}
+            <form onSubmit={onAuthSubmit}>
+              {currentView === 'signup' && (
+                <input
+                  className="login-input"
+                  type="text"
+                  name="fullName"
+                  value={authForm.fullName}
+                  onChange={onAuthInputChange}
+                  placeholder="Enter your full name"
+                  required
+                />
+              )}
+              <input
+                className="login-input"
+                type="email"
+                name="email"
+                value={authForm.email}
+                onChange={onAuthInputChange}
+                placeholder="Enter your email address"
+                required
+              />
+              <input
+                className="login-input"
+                type="password"
+                name="password"
+                value={authForm.password}
+                onChange={onAuthInputChange}
+                placeholder="Enter password"
+                required
+              />
+              {currentView === 'signup' && (
+                <input
+                  className="login-input"
+                  type="password"
+                  name="confirmPassword"
+                  value={authForm.confirmPassword}
+                  onChange={onAuthInputChange}
+                  placeholder="Confirm password"
+                  required
+                />
+              )}
 
-            {currentView === 'login' && (
-              <div className="login-forgot">
-                <a href="#home">Forgot Password?</a>
-              </div>
-            )}
+              {currentView === 'login' && (
+                <div className="login-forgot">
+                  <a href="#home">Forgot Password?</a>
+                </div>
+              )}
 
-            <button className="login-submit" type="button" onClick={goToAppPage}>{currentView === 'signup' ? 'Sign Up' : 'Sign In'}</button>
+              {authError && (
+                <div style={{ color: '#ffb78d', fontSize: '0.84rem', marginBottom: '0.7rem' }} role="alert">
+                  {authError}
+                </div>
+              )}
+
+              <button className="login-submit" type="submit">{currentView === 'signup' ? 'Sign Up' : 'Sign In'}</button>
+            </form>
 
             <div className="login-signup">
               {currentView === 'signup' ? (
@@ -2004,7 +2870,7 @@ function App() {
           </p>
 
           <div className="cta-row reveal" style={{ animationDelay: `${heroAnimationDelays[4]}s` }}>
-            <a className="btn btn-primary" href="#detect">Get Started →</a>
+            <a className="btn btn-primary" href="#login" onClick={goToLoginPage}>Get Started →</a>
             <a className="btn btn-secondary" href="#about">Learn More</a>
           </div>
 
@@ -2107,7 +2973,7 @@ function App() {
                 <h4>Team</h4>
                 <ul>
                   <li>Alviar, Justin James E.</li>
-                  <li>Arobi, Rashdy</li>
+                  <li>Arobie, Mohammad Rashdy L.</li>
                   <li>Climaco, John Lloyd L.</li>
                   <li>Mamiala, Denabhar</li>
                   <li>Lagoyo, Shadia</li>

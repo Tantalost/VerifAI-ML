@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 import './Orb.css';
 
 export default function Orb({
-  hue = 18,
+  hue = 0,
   hoverIntensity = 0.2,
   rotateOnHover = true,
   forceHoverState = false,
@@ -101,7 +101,7 @@ export default function Orb({
       return vec4(colorIn.rgb / (a + 1e-5), a);
     }
 
-    const vec3 baseColor1 = vec3(1.000000, 0.435294, 0.047059);
+    const vec3 baseColor1 = vec3(1.000000, 0.419608, 0.000000);
     const vec3 baseColor2 = vec3(1.000000, 0.603922, 0.282353);
     const vec3 baseColor3 = vec3(0.176471, 0.078431, 0.015686);
     const float innerRadius = 0.6;
