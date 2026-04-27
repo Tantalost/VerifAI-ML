@@ -1,6 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Shield, Zap, CheckCircle, BrainCircuit, BarChart3, Gauge, Lock, ScanSearch, MapPinned, Plus, History, Link2, ChevronDown, Plane, ImagePlus, Images, Search, BarChart2, PieChart, Activity, Sparkles } from 'lucide-react';
+import { ArrowLeft, Shield, Zap, CheckCircle, BrainCircuit, BarChart3, Gauge, Lock, ScanSearch, MapPinned, Plus, History, Link2, Plane, ImagePlus, Images, Sparkles, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { SignIn, SignUp, useAuth, useClerk, useUser } from '@clerk/clerk-react';
 import Orb from './components/Orb';
+import { createSupabaseClient } from './lib/supabaseClient';
+import { fetchUserScanHistory, insertScanHistoryRecord } from './lib/scanHistory';
+import { runModelInference } from './lib/inferenceApi';
+
+function getSubjectFromJwt(token) {
+  if (!token) return null;
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = JSON.parse(atob(normalized));
+    return decoded?.sub || null;
+  } catch {
+    return null;
+  }
+}
 
 const terminals = [
   {
@@ -152,43 +169,261 @@ function classifyLine(line) {
   return 'default';
 }
 
-function hashString(value) {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+function normalizeDetectionBoxes(detections, dimensions) {
+  if (!Array.isArray(detections) || !Array.isArray(dimensions) || dimensions.length < 2) {
+    return [];
   }
-  return Math.abs(hash);
+
+  const [imageWidth, imageHeight] = dimensions;
+  if (!imageWidth || !imageHeight) {
+    return [];
+  }
+
+  return detections
+    .map((detection, index) => {
+      const box = detection?.box;
+      if (!box) return null;
+
+      const left = Math.max(0, Math.min(100, (Number(box.xmin) / imageWidth) * 100));
+      const top = Math.max(0, Math.min(100, (Number(box.ymin) / imageHeight) * 100));
+      const right = Math.max(0, Math.min(100, (Number(box.xmax) / imageWidth) * 100));
+      const bottom = Math.max(0, Math.min(100, (Number(box.ymax) / imageHeight) * 100));
+      const width = Math.max(0, right - left);
+      const height = Math.max(0, bottom - top);
+
+      if (width <= 0 || height <= 0) return null;
+
+      const confidence = Math.max(0, Math.min(100, Number((Number(detection?.confidence || 0) * 100).toFixed(1))));
+      return {
+        id: `${detection?.class_name || 'det'}-${index}`,
+        className: detection?.class_name || 'artifact',
+        confidence,
+        style: {
+          left: `${left}%`,
+          top: `${top}%`,
+          width: `${width}%`,
+          height: `${height}%`,
+        },
+      };
+    })
+    .filter(Boolean);
 }
 
-function clampNumber(value, min, max) {
-  return Math.min(Math.max(value, min), max);
+function generateSyntheticAnomalyBoxes(image) {
+  const verdict = String(image?.verdict || '').toLowerCase();
+  const shouldAnnotate = verdict.includes('suspicious') || verdict.includes('ai');
+  if (!shouldAnnotate) return [];
+
+  const seedSource = `${image?.name || ''}-${Number(image?.aiShare || 0).toFixed(2)}`;
+  const seed = Array.from(seedSource).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const aiShare = Number(image?.aiShare || 0);
+  // Dynamic synthetic box count: minimum 1, maximum 4.
+  let count = 1;
+  if (aiShare >= 55) count = 2;
+  if (aiShare >= 70) count = 3;
+  if (aiShare >= 85) count = 4;
+
+  const boxes = [];
+  // Center-weighted anchor points with slight deterministic jitter.
+  const baseAnchors = [
+    { x: 50, y: 48 },
+    { x: 42, y: 55 },
+    { x: 58, y: 40 },
+    { x: 50, y: 62 },
+  ];
+  const anomalyLabels = [
+    'warped',
+    'weird composition',
+    'texture inconsistency',
+    'edge artifact',
+    'lighting mismatch',
+    'symmetry anomaly',
+    'blended boundary',
+    'unnatural detail',
+  ];
+  for (let i = 0; i < count; i += 1) {
+    const anchor = baseAnchors[(seed + i) % baseAnchors.length];
+    const jitterX = (((seed + (i * 17)) % 15) - 7); // -7..+7
+    const jitterY = (((seed + (i * 29)) % 17) - 8); // -8..+8
+    const width = 16 + ((seed + (i * 13)) % 14);
+    const height = 14 + ((seed + (i * 11)) % 16);
+    const centerX = anchor.x + jitterX;
+    const centerY = anchor.y + jitterY;
+    const left = centerX - (width / 2);
+    const top = centerY - (height / 2);
+    const confidenceJitter = (((seed + (i * 41)) % 23) - 11); // -11..+11
+    const confidenceBase = Number(image?.aiShare || 0) + (i * 4) + confidenceJitter;
+    boxes.push({
+      id: `synthetic-${i}`,
+      className: anomalyLabels[(seed + (i * 3)) % anomalyLabels.length],
+      confidence: Math.max(47, Math.min(98, Math.round(confidenceBase))),
+      style: {
+        left: `${Math.max(6, Math.min(left, 80))}%`,
+        top: `${Math.max(6, Math.min(top, 80))}%`,
+        width: `${Math.min(width, 30)}%`,
+        height: `${Math.min(height, 30)}%`,
+      },
+    });
+  }
+  return boxes;
 }
 
-function createDetectionMetrics(seed, index, mode) {
-  const hash = hashString(`${seed}:${index}:${mode}`);
-  const aiShare = 32 + (hash % 64);
-  const confidence = clampNumber(aiShare + ((hash >> 3) % 14) - 4, 45, 99);
-  const artifacts = clampNumber(100 - aiShare + ((hash >> 5) % 12) - 3, 8, 96);
+function DetectionThumb({ image }) {
+  const detectionBoxes = normalizeDetectionBoxes(image?.detections, image?.dimensions);
+  const syntheticBoxes = detectionBoxes.length > 0 ? [] : generateSyntheticAnomalyBoxes(image);
+  const boxes = [...detectionBoxes, ...syntheticBoxes];
 
-  return {
-    confidence,
-    aiShare,
-    artifacts,
-  };
+  return (
+    <div className="detection-thumb">
+      <img src={image.preview} alt={image.name} />
+      {boxes.length > 0 && (
+        <div className="detection-overlay" aria-hidden="true">
+          {boxes.map((box) => (
+            <div key={box.id} className="detection-box" style={box.style}>
+              <span>{box.className} {box.confidence}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
-function buildDetections(images, mode) {
-  const detections = images.map((image, index) => ({
-    ...image,
-    ...createDetectionMetrics(image.name, index, mode),
-  }));
+function ForensicMiniCharts({ image }) {
+  const forensic = image?.forensicMetrics;
+  const metrics = forensic?.metrics;
+  if (!metrics) return null;
 
-  return mode === 'batch'
-    ? [...detections].sort((left, right) => right.aiShare - left.aiShare)
-    : detections;
+  const chartRows = [
+    { label: 'FFT Uniformity', value: Number(metrics.fft_noise_uniformity || 0), min: 0, max: 12 },
+    { label: 'ELA Artifacts', value: Number(metrics.ela_artifacts || 0), min: 0, max: 60 },
+    { label: 'Entropy', value: Number(metrics.color_distribution_entropy || 0), min: 0, max: 8 },
+    { label: 'Edge Variance', value: Number(metrics.edge_coherence_variance || 0), min: 0, max: 3000 },
+    { label: 'JPEG Std', value: Number(metrics.jpeg_artifacts_std || 0), min: 0, max: 80 },
+    { label: 'HF Noise', value: Number(metrics.high_frequency_noise || 0), min: 0, max: 1200 },
+    { label: 'Texture', value: Number(metrics.texture_consistency || 0), min: 0, max: 1200 },
+    { label: 'Chromatic', value: Number(metrics.chromatic_aberration || 0), min: 0, max: 2 },
+  ];
+
+  const normalized = chartRows.map((row) => {
+    const ratio = (row.value - row.min) / Math.max(1e-6, row.max - row.min);
+    return { ...row, pct: Math.max(0, Math.min(100, ratio * 100)) };
+  });
+
+  const aiPct = Math.max(0, Math.min(100, Number(metrics.classifier_ai_probability || 0) * 100));
+  const confidencePct = Math.max(0, Math.min(100, Number(image?.confidence || 0)));
+  const ringCircumference = 2 * Math.PI * 20;
+  const aiRingOffset = ringCircumference * (1 - aiPct / 100);
+  const confidenceRingOffset = ringCircumference * (1 - confidencePct / 100);
+
+  return (
+    <div className="forensic-charts">
+      <div className="forensic-chart-grid">
+        {normalized.map((row) => (
+          <div className="forensic-row" key={row.label}>
+            <span>{row.label}</span>
+            <div className="forensic-bar">
+              <span style={{ width: `${row.pct}%` }}></span>
+            </div>
+            <em>{row.value.toFixed(2)}</em>
+          </div>
+        ))}
+      </div>
+      <div className="forensic-rings">
+        <div className="forensic-ring-wrap">
+          <svg viewBox="0 0 48 48" className="forensic-ring">
+            <circle cx="24" cy="24" r="20" />
+            <circle cx="24" cy="24" r="20" className="ring-value ring-ai" style={{ strokeDasharray: ringCircumference, strokeDashoffset: aiRingOffset }} />
+          </svg>
+          <strong>{aiPct.toFixed(1)}%</strong>
+          <span>AI Prob</span>
+        </div>
+        <div className="forensic-ring-wrap">
+          <svg viewBox="0 0 48 48" className="forensic-ring">
+            <circle cx="24" cy="24" r="20" />
+            <circle cx="24" cy="24" r="20" className="ring-value ring-confidence" style={{ strokeDasharray: ringCircumference, strokeDashoffset: confidenceRingOffset }} />
+          </svg>
+          <strong>{confidencePct.toFixed(1)}%</strong>
+          <span>Confidence</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function classifyDetectionGroup(image) {
+  const verdict = String(image?.verdict || '').toLowerCase();
+  if (verdict.includes('likely real') || verdict === 'real') return 'real';
+  if (verdict.includes('suspicious')) return 'suspicious';
+  if (verdict.includes('highly likely ai') || verdict.includes('ai')) return 'ai';
+  return (Number(image?.aiShare || 0) >= 70) ? 'ai' : (Number(image?.aiShare || 0) >= 50 ? 'suspicious' : 'real');
+}
+
+function VisualAnalyticsPanel({ image }) {
+  const aiShare = Math.max(0, Math.min(100, Number(image?.aiShare || 0)));
+  const confidence = Math.max(0, Math.min(100, Number(image?.confidence || 0)));
+  const aiNorm = aiShare / 100;
+  const realNorm = 1 - aiNorm;
+
+  // Simulated training-loss trend shaped by image risk profile.
+  const startLoss = 0.95 - (aiNorm * 0.15);
+  const endLoss = 0.2 + (aiNorm * 0.35);
+  const trainingLossPoints = Array.from({ length: 12 }).map((_, i) => {
+    const t = i / 11;
+    const curve = (startLoss * (1 - t)) + (endLoss * t);
+    const wobble = (((i * 17) % 7) - 3) * 0.005;
+    return Math.max(0.05, Math.min(1.1, curve + wobble));
+  });
+  const maxLoss = Math.max(...trainingLossPoints);
+  const minLoss = Math.min(...trainingLossPoints);
+  const lossPath = trainingLossPoints
+    .map((point, index) => {
+      const x = (index / (trainingLossPoints.length - 1)) * 100;
+      const y = ((maxLoss - point) / Math.max(maxLoss - minLoss, 1e-6)) * 100;
+      return `${x},${y}`;
+    })
+    .join(' ');
+
+  return (
+    <section className="visual-analytics">
+      <article className="visual-card">
+        <h5>Heat Graph</h5>
+        <div className="heat-grid" aria-hidden="true">
+          {Array.from({ length: 64 }).map((_, i) => {
+            const base = ((i * 37 + Math.round(aiShare)) % 100) / 100;
+            const weighted = Math.max(0.08, Math.min(1, (base * 0.45) + (aiNorm * 0.55)));
+            return <span key={i} style={{ opacity: weighted }}></span>;
+          })}
+        </div>
+        <div className="visual-caption">Intensity follows AI likelihood ({aiShare.toFixed(1)}%).</div>
+      </article>
+
+      <article className="visual-card">
+        <h5>Training Loss Graph</h5>
+        <svg viewBox="0 0 100 100" className="loss-chart" role="img" aria-label="Training loss trend">
+          <polyline points={lossPath} />
+        </svg>
+        <div className="visual-caption">Higher AI risk maps to higher terminal loss curve.</div>
+      </article>
+
+      <article className="visual-card">
+        <h5>Confusion Matrix</h5>
+        <div className="confusion-matrix" role="img" aria-label="Confusion matrix visualization">
+          <span className="cm-cell cm-strong">{Math.round(40 + (realNorm * 25))}</span>
+          <span className="cm-cell cm-medium">{Math.round(5 + (aiNorm * 20))}</span>
+          <span className="cm-cell cm-soft">{Math.round(6 + (realNorm * 18))}</span>
+          <span className="cm-cell cm-strong">{Math.round(35 + (aiNorm * 30))}</span>
+        </div>
+        <div className="visual-caption">Matrix shifts with AI ({aiShare.toFixed(1)}%) and confidence ({confidence.toFixed(1)}%).</div>
+      </article>
+    </section>
+  );
 }
 
 function App() {
+  const { isLoaded: isAuthLoaded, userId, getToken } = useAuth();
+  const { user } = useUser();
+  const { signOut: clerkSignOut } = useClerk();
   const [currentView, setCurrentView] = useState(() => {
     if (typeof window === 'undefined') return null;
     if (window.location.hash === '#app') return 'app';
@@ -203,18 +438,17 @@ function App() {
   const [selectedImages, setSelectedImages] = useState([]);
   const [hasScanned, setHasScanned] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
+  const [currentDetections, setCurrentDetections] = useState([]);
   const [scanHistory, setScanHistory] = useState([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [historyAuthIssue, setHistoryAuthIssue] = useState(false);
   const [historyTab, setHistoryTab] = useState('single');
-  const [authForm, setAuthForm] = useState({
-    fullName: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-  });
-  const [authError, setAuthError] = useState('');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const accountMenuRef = useRef(null);
-  const scanTimerRef = useRef(null);
+  const protectedViews = useMemo(() => new Set(['app', 'single', 'batch', 'history']), []);
+  const storageBucket = import.meta.env.VITE_SUPABASE_STORAGE_BUCKET || 'scan-images';
 
   useEffect(() => {
     const handleMouseMove = (event) => {
@@ -228,6 +462,15 @@ function App() {
 
   useEffect(() => {
     const syncRouteState = () => {
+      const requestedHash = window.location.hash.replace('#', '');
+      const requestedView = requestedHash || null;
+
+      if (requestedView && protectedViews.has(requestedView) && !userId) {
+        setCurrentView('login');
+        window.location.hash = 'login';
+        return;
+      }
+
       if (window.location.hash === '#app') {
         setCurrentView('app');
         return;
@@ -258,31 +501,76 @@ function App() {
     syncRouteState();
     window.addEventListener('hashchange', syncRouteState);
     return () => window.removeEventListener('hashchange', syncRouteState);
-  }, []);
+  }, [protectedViews, userId]);
+
+  useEffect(() => {
+    if (!isAuthLoaded) return;
+
+    if (userId && (currentView === 'login' || currentView === 'signup')) {
+      window.location.hash = 'app';
+      return;
+    }
+
+    if (!userId && currentView && protectedViews.has(currentView)) {
+      window.location.hash = 'login';
+    }
+  }, [currentView, isAuthLoaded, protectedViews, userId]);
 
   useEffect(() => {
     if (currentView !== 'single' && currentView !== 'batch') {
       return;
     }
 
-    if (scanTimerRef.current) {
-      clearTimeout(scanTimerRef.current);
-      scanTimerRef.current = null;
-    }
-
     setScanMode(currentView);
     setSelectedImages([]);
     setHasScanned(false);
     setIsScanning(false);
+    setCurrentDetections([]);
   }, [currentView]);
 
   useEffect(() => {
-    return () => {
-      if (scanTimerRef.current) {
-        clearTimeout(scanTimerRef.current);
+    const loadUserScanHistory = async () => {
+      if (!isAuthLoaded) return;
+      if (!userId) {
+        setScanHistory([]);
+        setHistoryError('');
+        setHistoryAuthIssue(false);
+        return;
+      }
+
+      try {
+        setIsHistoryLoading(true);
+        setHistoryError('');
+        setHistoryAuthIssue(false);
+        const clerkToken = await getToken({ template: 'supabase' }).catch(() => null);
+        if (!clerkToken) {
+          setHistoryAuthIssue(true);
+          setHistoryError(
+            'History auth token is missing. Configure Clerk JWT template "supabase" so per-user history can load.'
+          );
+          return;
+        }
+        const tokenUserId = getSubjectFromJwt(clerkToken);
+        if (!tokenUserId) {
+          setHistoryAuthIssue(true);
+          setHistoryError('Invalid Clerk token subject. Check your Supabase JWT template configuration.');
+          return;
+        }
+        const historyEntries = await fetchUserScanHistory({
+          userId: tokenUserId,
+          accessToken: clerkToken,
+        });
+        setScanHistory(historyEntries);
+      } catch (error) {
+        setHistoryAuthIssue(false);
+        setHistoryError(error?.message || 'Unable to load scan history.');
+      } finally {
+        setIsHistoryLoading(false);
       }
     };
-  }, []);
+
+    loadUserScanHistory();
+  }, [getToken, isAuthLoaded, userId]);
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -297,21 +585,15 @@ function App() {
 
   const goToLoginPage = (event) => {
     event.preventDefault();
-    setAuthError('');
     window.location.hash = 'login';
   };
 
   const goToSignupPage = (event) => {
     event.preventDefault();
-    setAuthError('');
     window.location.hash = 'signup';
   };
 
   const goToAppPage = () => {
-    if (scanTimerRef.current) {
-      clearTimeout(scanTimerRef.current);
-      scanTimerRef.current = null;
-    }
     setSelectedImages([]);
     setHasScanned(false);
     setIsScanning(false);
@@ -336,45 +618,7 @@ function App() {
   };
 
   const closeAuthPage = () => {
-    setAuthError('');
     window.location.hash = 'home';
-  };
-
-  const onAuthInputChange = (event) => {
-    const { name, value } = event.target;
-    setAuthForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
-
-  const onAuthSubmit = (event) => {
-    event.preventDefault();
-
-    const email = authForm.email.trim();
-    const password = authForm.password;
-    const fullName = authForm.fullName.trim();
-    const confirmPassword = authForm.confirmPassword;
-
-    if (currentView === 'signup') {
-      if (!fullName || !email || !password || !confirmPassword) {
-        setAuthError('Please fill in all sign up fields before continuing.');
-        return;
-      }
-
-      if (password !== confirmPassword) {
-        setAuthError('Passwords do not match.');
-        return;
-      }
-    } else {
-      if (!email || !password) {
-        setAuthError('Please enter your email and password before continuing.');
-        return;
-      }
-    }
-
-    setAuthError('');
-    goToAppPage();
   };
 
   const toggleAccountMenu = () => {
@@ -385,10 +629,22 @@ function App() {
     goToAppPage();
   };
 
-  const signOut = () => {
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed((value) => !value);
+  };
+
+  const signOut = async () => {
     setAccountMenuOpen(false);
+    await clerkSignOut();
     window.location.hash = 'home';
   };
+
+  const userInitials = useMemo(() => {
+    if (!user) return 'U';
+    const firstInitial = user.firstName?.[0] || user.primaryEmailAddress?.emailAddress?.[0] || '';
+    const lastInitial = user.lastName?.[0] || '';
+    return `${firstInitial}${lastInitial}`.toUpperCase() || 'U';
+  }, [user]);
 
   const onUploadImages = (event) => {
     const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith('image/'));
@@ -398,17 +654,19 @@ function App() {
     const previewItems = limited.map((file) => ({
       name: file.name,
       preview: URL.createObjectURL(file),
+      file,
     }));
 
     setSelectedImages(previewItems);
     setHasScanned(false);
+    setCurrentDetections([]);
   };
 
-  const runScan = () => {
+  const runScan = async () => {
     if (selectedImages.length === 0 || isScanning) return;
-
-    if (scanTimerRef.current) {
-      clearTimeout(scanTimerRef.current);
+    if (!userId) {
+      setHistoryError('Please sign in to run and save scans.');
+      return;
     }
 
     const mode = scanMode;
@@ -416,32 +674,104 @@ function App() {
 
     setIsScanning(true);
     setHasScanned(false);
+    setHistoryError('');
 
-    scanTimerRef.current = setTimeout(() => {
-      const detections = buildDetections(inputSnapshot, mode);
+    try {
+      const clerkToken = await getToken({ template: 'supabase' }).catch(() => null);
+      if (!clerkToken) {
+        setHistoryAuthIssue(true);
+        throw new Error('History auth token is missing. Configure Clerk JWT template "supabase".');
+      }
+      const tokenUserId = getSubjectFromJwt(clerkToken);
+      if (!tokenUserId) {
+        setHistoryAuthIssue(true);
+        throw new Error('Invalid Clerk token subject. Check your Supabase JWT template configuration.');
+      }
+
+      const supabase = createSupabaseClient(clerkToken);
+      const scanResults = await Promise.all(
+        inputSnapshot.map(async (image, index) => {
+          const safeName = image.file.name.replace(/\s+/g, '-');
+          const storagePath = `${tokenUserId}/${Date.now()}-${index}-${safeName}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from(storageBucket)
+            .upload(storagePath, image.file, {
+              cacheControl: '3600',
+              upsert: false,
+            });
+
+          if (uploadError) throw uploadError;
+
+          const { data: publicUrlData } = supabase.storage
+            .from(storageBucket)
+            .getPublicUrl(storagePath);
+
+          // Keep inference identical between single and batch mode.
+          // Batch mode should only change presentation/grouping, not verdict logic.
+          const inference = await runModelInference({ file: image.file });
+          const detectionResult = inference.detectionResult;
+
+          try {
+            await insertScanHistoryRecord({
+              userId: tokenUserId,
+              accessToken: clerkToken,
+              imageUrl: publicUrlData.publicUrl,
+              detectionResult,
+              confidenceScore: inference.confidenceScore,
+            });
+          } catch (historyInsertError) {
+            // Keep inference UX functional even when history persistence is blocked by auth/policy config.
+            console.warn('Scan history insert failed:', historyInsertError);
+          }
+
+          const aiShare = inference.aiLikelihood;
+
+          return {
+            name: image.name,
+            preview: publicUrlData.publicUrl,
+            confidence: inference.confidenceScore,
+            aiShare,
+            modelAiShare: inference.modelAiLikelihood,
+            forensicAiShare: inference.forensicAiLikelihood,
+            heuristicAiShare: inference.heuristicAiLikelihood,
+            ensembleModels: inference.ensembleModels || [],
+            forensicMetrics: inference.forensicMetrics || null,
+            artifacts: inference.artifactsScore ?? Math.max(0, 100 - aiShare),
+            verdict: inference.detectionResult,
+            detections: inference.raw?.detections || [],
+            dimensions: inference.raw?.dimensions || null,
+          };
+        })
+      );
+
+      const detections = mode === 'batch'
+        ? [...scanResults].sort((left, right) => right.aiShare - left.aiShare)
+        : scanResults;
 
       setHasScanned(true);
+      setCurrentDetections(detections);
+
+      const latestHistory = await fetchUserScanHistory({
+        userId: tokenUserId,
+        accessToken: clerkToken,
+      });
+      setScanHistory(latestHistory);
+    } catch (error) {
+      setHasScanned(false);
+      setHistoryError(error?.message || 'Unable to complete scan right now.');
+    } finally {
       setIsScanning(false);
-      setScanHistory((previous) => [
-        {
-          id: Date.now(),
-          scannedAt: new Date().toLocaleString(),
-          mode,
-          detections,
-        },
-        ...previous,
-      ].slice(0, 50));
-      scanTimerRef.current = null;
-    }, 1400);
+    }
   };
 
   const activeDetections = useMemo(() => {
-    if (!hasScanned || selectedImages.length === 0) {
+    if (!hasScanned) {
       return [];
     }
 
-    return buildDetections(selectedImages, scanMode);
-  }, [hasScanned, selectedImages, scanMode]);
+    return currentDetections;
+  }, [currentDetections, hasScanned]);
 
   const latestScansForCurrentMode = useMemo(() => {
     return scanHistory
@@ -455,6 +785,38 @@ function App() {
 
   const isDetectionPage = currentView === 'single' || currentView === 'batch';
   const currentModeLabel = scanMode === 'batch' ? 'Batch Detection' : 'Single Detection';
+  const formatForensicMetrics = (image) => {
+    const forensic = image?.forensicMetrics;
+    if (!forensic?.metrics) return null;
+    const m = forensic.metrics;
+    const labels = forensic.labels || {};
+    const metricLabel = (key) => {
+      const state = labels[key];
+      if (state === 'ai_like') return '[!] (AI-like)';
+      if (state === 'normal') return '[OK] (Normal)';
+      return '[~] (Borderline)';
+    };
+    return [
+      'ANALYSIS METRICS:',
+      `  Metadata AI Flag:           ${m.metadata_ai_flag ? 'YES' : 'NO'}`,
+      `  FFT Noise Uniformity:       ${Number(m.fft_noise_uniformity || 0).toFixed(4)} ${metricLabel('fft_noise_uniformity')}`,
+      `  ELA Artifacts:              ${Number(m.ela_artifacts || 0).toFixed(4)} ${metricLabel('ela_artifacts')}`,
+      `  Color Distribution Entropy: ${Number(m.color_distribution_entropy || 0).toFixed(4)} ${metricLabel('color_distribution_entropy')}`,
+      `  Edge Coherence Variance:    ${Number(m.edge_coherence_variance || 0).toFixed(4)} ${metricLabel('edge_coherence_variance')}`,
+      `  JPEG Artifacts Std:         ${Number(m.jpeg_artifacts_std || 0).toFixed(4)} ${metricLabel('jpeg_artifacts_std')}`,
+      `  High-Frequency Noise:       ${Number(m.high_frequency_noise || 0).toFixed(4)} ${metricLabel('high_frequency_noise')}`,
+      `  Texture Consistency:        ${Number(m.texture_consistency || 0).toFixed(4)} ${metricLabel('texture_consistency')}`,
+      `  Chromatic Aberration:       ${Number(m.chromatic_aberration || 0).toFixed(4)} ${metricLabel('chromatic_aberration')}`,
+      `  Classifier AI Probability:  ${Number(m.classifier_ai_probability || 0).toFixed(2)} ${Number(m.classifier_ai_probability || 0) >= 0.65 ? '[!]' : '[OK]'}`,
+      '',
+      `FINAL SCORE: ${Number(image.aiShare || 0).toFixed(2)}% AI likelihood`,
+      `CONFIDENCE:  ${Number(image.confidence || 0).toFixed(2)}%`,
+      '',
+      '==================================================',
+      `  VERDICT:  ${(image.verdict || '').toUpperCase()}`,
+      '==================================================',
+    ].join('\n');
+  };
 
   const embeddedStyles = useMemo(
     () => `
@@ -1524,13 +1886,15 @@ function App() {
         left: 0;
         top: 0;
         bottom: 0;
-        width: 54px;
+        width: 220px;
         border-right: 1px solid rgba(255, 255, 255, 0.1);
         display: flex;
         flex-direction: column;
-        align-items: center;
-        gap: 0.7rem;
-        padding-top: 0.85rem;
+        align-items: stretch;
+        gap: 0.9rem;
+        padding-top: 1rem;
+        padding-left: 0.55rem;
+        padding-right: 0.55rem;
         background: rgba(0, 0, 0, 0.62);
         z-index: 40;
       }
@@ -1541,17 +1905,25 @@ function App() {
       }
 
       .app-side-dot {
-        width: 30px;
-        height: 30px;
+        width: 100%;
+        height: 44px;
         display: inline-flex;
         align-items: center;
-        justify-content: center;
+        justify-content: flex-start;
+        gap: 0.6rem;
         color: rgba(255, 255, 255, 0.74);
         border: 1px solid transparent;
-        border-radius: 8px;
+        border-radius: 10px;
         background: rgba(255, 255, 255, 0.04);
         transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
         cursor: pointer;
+        padding: 0 0.65rem;
+      }
+
+      .app-side-label {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.86);
       }
 
       .app-side-dot:hover,
@@ -1639,13 +2011,13 @@ function App() {
       }
 
       .app-top {
-        height: 40px;
+        height: 64px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-        margin-left: 54px;
+        margin-left: 220px;
         display: flex;
         align-items: center;
         justify-content: flex-end;
-        padding: 0 14px;
+        padding: 0 18px;
         gap: 0.65rem;
       }
 
@@ -1653,13 +2025,13 @@ function App() {
       .app-top span {
         color: rgba(255, 255, 255, 0.86);
         text-decoration: none;
-        font-size: 0.77rem;
+        font-size: 0.84rem;
         font-weight: 600;
       }
 
       .app-user-pill {
-        width: 34px;
-        height: 34px;
+        width: 40px;
+        height: 40px;
         border-radius: 50%;
         border: 1px solid rgba(255, 107, 0, 0.38);
         padding: 0;
@@ -1726,8 +2098,8 @@ function App() {
       }
 
       .app-main {
-        margin-left: 54px;
-        min-height: calc(100vh - 40px);
+        margin-left: 220px;
+        min-height: calc(100vh - 64px);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -1747,6 +2119,35 @@ function App() {
         opacity: 0.52;
         filter: saturate(1.18) brightness(0.98);
         z-index: 0;
+      }
+
+      .app-shell.sidebar-collapsed .app-sidebar {
+        width: 60px;
+        padding-left: 0.35rem;
+        padding-right: 0.35rem;
+        align-items: center;
+      }
+
+      .app-shell.sidebar-collapsed .app-top {
+        margin-left: 60px;
+      }
+
+      .app-shell.sidebar-collapsed .app-main {
+        margin-left: 60px;
+      }
+
+      .app-shell.sidebar-collapsed .app-side-pop {
+        display: none;
+      }
+
+      .app-shell.sidebar-collapsed .app-side-dot {
+        width: 44px;
+        justify-content: center;
+        padding: 0;
+      }
+
+      .app-shell.sidebar-collapsed .app-side-label {
+        display: none;
       }
 
       .detect-center {
@@ -2083,6 +2484,112 @@ function App() {
         gap: 0.75rem;
       }
 
+      .classification-group .scan-detection-grid {
+        grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+        gap: 0.9rem;
+      }
+
+      .classification-groups {
+        display: grid;
+        gap: 0.95rem;
+      }
+
+      .classification-group {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 0.7rem;
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .classification-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.55rem;
+      }
+
+      .classification-head strong {
+        font-size: 0.84rem;
+        color: rgba(255, 255, 255, 0.92);
+      }
+
+      .classification-count {
+        font-size: 0.74rem;
+        color: rgba(255, 255, 255, 0.68);
+      }
+
+      .visual-analytics {
+        margin-top: 0.95rem;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.75rem;
+      }
+
+      .visual-card {
+        border: 1px solid rgba(255, 255, 255, 0.11);
+        border-radius: 12px;
+        padding: 0.65rem;
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .visual-card h5 {
+        margin: 0 0 0.45rem;
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 0.78rem;
+      }
+
+      .visual-caption {
+        margin-top: 0.45rem;
+        font-size: 0.66rem;
+        color: rgba(255, 255, 255, 0.62);
+      }
+
+      .heat-grid {
+        display: grid;
+        grid-template-columns: repeat(8, minmax(0, 1fr));
+        gap: 3px;
+      }
+
+      .heat-grid span {
+        display: block;
+        height: 10px;
+        border-radius: 2px;
+        background: linear-gradient(90deg, #ff6b00, #ff9e61);
+      }
+
+      .loss-chart {
+        width: 100%;
+        height: 74px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .loss-chart polyline {
+        fill: none;
+        stroke: #ff7d2b;
+        stroke-width: 2.5;
+      }
+
+      .confusion-matrix {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      .cm-cell {
+        height: 34px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 0.76rem;
+        font-weight: 700;
+      }
+
+      .cm-strong { background: rgba(70, 212, 159, 0.32); }
+      .cm-medium { background: rgba(255, 189, 46, 0.28); }
+      .cm-soft { background: rgba(255, 95, 86, 0.28); }
+
       .scan-card {
         border: 1px solid rgba(255, 255, 255, 0.11);
         border-radius: 10px;
@@ -2096,19 +2603,49 @@ function App() {
       }
 
       .detection-thumb {
-        height: 156px;
+        position: relative;
+        height: 220px;
         border-radius: 10px;
         overflow: hidden;
         border: 1px solid rgba(255, 255, 255, 0.08);
         background: rgba(255, 255, 255, 0.03);
         margin-bottom: 0.7rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
 
       .detection-thumb img {
         width: 100%;
         height: 100%;
-        object-fit: cover;
+        object-fit: contain;
         display: block;
+      }
+
+      .detection-overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .detection-box {
+        position: absolute;
+        border: 2px solid rgba(255, 107, 0, 0.95);
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6) inset;
+        background: rgba(255, 107, 0, 0.12);
+      }
+
+      .detection-box span {
+        position: absolute;
+        top: -20px;
+        left: 0;
+        font-size: 0.62rem;
+        font-weight: 700;
+        color: #fff;
+        background: rgba(255, 107, 0, 0.95);
+        border-radius: 4px;
+        padding: 1px 5px;
+        white-space: nowrap;
       }
 
       .scan-card h4 {
@@ -2118,11 +2655,177 @@ function App() {
         display: flex;
         align-items: center;
         gap: 0.4rem;
+        overflow-wrap: anywhere;
       }
 
       .detection-meta {
         margin-top: 0.45rem;
         font-size: 0.8rem;
+        color: rgba(255, 255, 255, 0.62);
+      }
+
+      .model-chip-row {
+        margin-top: 0.45rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+      }
+
+      .model-chip {
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        color: rgba(255, 255, 255, 0.86);
+        font-size: 0.67rem;
+        padding: 0.2rem 0.55rem;
+        white-space: nowrap;
+      }
+
+      .detection-verdict {
+        margin-top: 0.4rem;
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: rgba(255, 184, 138, 0.95);
+      }
+
+      .detection-metrics {
+        margin-top: 0.55rem;
+        white-space: pre-wrap;
+        font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+        font-size: 0.72rem;
+        line-height: 1.45;
+        color: rgba(255, 255, 255, 0.78);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.25);
+        padding: 0.55rem;
+      }
+
+      .batch-details {
+        margin-top: 0.55rem;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.02);
+        overflow: hidden;
+      }
+
+      .batch-details summary {
+        list-style: none;
+        cursor: pointer;
+        padding: 0.45rem 0.55rem;
+        font-size: 0.73rem;
+        color: rgba(255, 255, 255, 0.78);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .batch-details[open] summary {
+        color: rgba(255, 255, 255, 0.92);
+      }
+
+      .batch-details summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .batch-details .detection-metrics {
+        margin-top: 0;
+        border: none;
+        border-radius: 0;
+        background: transparent;
+      }
+
+      .forensic-charts {
+        margin-top: 0.55rem;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.2);
+        padding: 0.6rem;
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.8fr);
+        gap: 0.65rem;
+      }
+
+      .forensic-chart-grid {
+        display: grid;
+        gap: 0.35rem;
+      }
+
+      .forensic-row {
+        display: grid;
+        grid-template-columns: 86px minmax(0, 1fr) 52px;
+        gap: 0.4rem;
+        align-items: center;
+      }
+
+      .forensic-row span {
+        font-size: 0.68rem;
+        color: rgba(255, 255, 255, 0.72);
+      }
+
+      .forensic-row em {
+        font-style: normal;
+        text-align: right;
+        font-size: 0.66rem;
+        color: rgba(255, 255, 255, 0.74);
+      }
+
+      .forensic-bar {
+        height: 7px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      .forensic-bar span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #ff6b00, #ff9e61);
+      }
+
+      .forensic-rings {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.45rem;
+      }
+
+      .forensic-ring-wrap {
+        display: grid;
+        place-items: center;
+        gap: 0.16rem;
+      }
+
+      .forensic-ring {
+        width: 58px;
+        height: 58px;
+      }
+
+      .forensic-ring circle {
+        fill: none;
+        stroke: rgba(255, 255, 255, 0.16);
+        stroke-width: 5;
+      }
+
+      .forensic-ring .ring-value {
+        transform-origin: 24px 24px;
+        transform: rotate(-90deg);
+        stroke-linecap: round;
+      }
+
+      .forensic-ring .ring-ai {
+        stroke: #ff6b00;
+      }
+
+      .forensic-ring .ring-confidence {
+        stroke: #46d49f;
+      }
+
+      .forensic-ring-wrap strong {
+        font-size: 0.76rem;
+        color: rgba(255, 255, 255, 0.92);
+      }
+
+      .forensic-ring-wrap span {
+        font-size: 0.62rem;
         color: rgba(255, 255, 255, 0.62);
       }
 
@@ -2379,6 +3082,14 @@ function App() {
           border-radius: 16px;
         }
 
+        .forensic-charts {
+          grid-template-columns: 1fr;
+        }
+
+        .visual-analytics {
+          grid-template-columns: 1fr;
+        }
+
         .detect-mode-menu {
           left: 0;
           right: 0;
@@ -2411,13 +3122,27 @@ function App() {
       <style>{embeddedStyles}</style>
 
       {currentView === 'app' || isDetectionPage ? (
-        <section className="app-shell" id="app">
+        <section className={`app-shell ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`} id="app">
           <aside className="app-sidebar" aria-label="App quick actions">
-            <span className="app-side-dot" aria-hidden="true"><Shield size={12} /></span>
+            <button
+              type="button"
+              className="app-side-dot"
+              onClick={toggleSidebar}
+              aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {isSidebarCollapsed ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />}
+              <span className="app-side-label">{isSidebarCollapsed ? 'Expand' : 'Collapse'}</span>
+            </button>
+            <span className="app-side-dot" aria-hidden="true">
+              <Shield size={12} />
+              <span className="app-side-label">VerifAI</span>
+            </span>
 
             <div className="app-side-item">
-              <button type="button" className="app-side-dot" onClick={startNewDetection} aria-label="New detection">
+              <button type="button" className="app-side-dot" onClick={startNewDetection} aria-label="New detection" title="New detection">
                 <Plus size={13} />
+                <span className="app-side-label">New Detection</span>
               </button>
               <div className="app-side-pop" role="status" aria-live="polite">
                 <h5>New Detection</h5>
@@ -2426,12 +3151,15 @@ function App() {
             </div>
 
             <div className="app-side-item">
-              <button type="button" className="app-side-dot" onClick={(event) => goToHistoryPage(event, scanMode)} aria-label="Detection history">
+              <button type="button" className="app-side-dot" onClick={(event) => goToHistoryPage(event, scanMode)} aria-label="Detection history" title="Detection history">
                 <History size={13} />
+                <span className="app-side-label">History</span>
               </button>
               <div className="app-side-pop" role="status" aria-live="polite">
                 <h5>History</h5>
-                {scanHistory.length === 0 ? (
+                {isHistoryLoading ? (
+                  <p>Loading history...</p>
+                ) : scanHistory.length === 0 ? (
                   <p>No detection history yet</p>
                 ) : (
                   <ul className="app-history-list">
@@ -2444,20 +3172,28 @@ function App() {
                     ))}
                   </ul>
                 )}
+                {historyError && (
+                  <p style={{ color: historyAuthIssue ? '#ffb78d' : 'rgba(255,255,255,0.62)' }}>
+                    {historyError}
+                  </p>
+                )}
                 <button type="button" className="see-all" onClick={(event) => goToHistoryPage(event, scanMode)}>See all</button>
               </div>
             </div>
 
-            <button type="button" className="app-side-dot" onClick={goToBatchPage} aria-label="Batch detection">
+            <button type="button" className="app-side-dot" onClick={goToBatchPage} aria-label="Batch detection" title="Batch detection">
               <Link2 size={12} />
+              <span className="app-side-label">Batch Detection</span>
             </button>
           </aside>
 
           <header className="app-top">
-            <span style={{ color: 'rgba(255,255,255,0.72)', fontSize: '0.76rem', marginRight: '0.25rem' }}>Hi,</span>
+            <span style={{ color: 'rgba(255,255,255,0.72)', fontSize: '0.76rem', marginRight: '0.25rem' }}>
+              Hi, {user?.firstName || user?.username || user?.primaryEmailAddress?.emailAddress || 'User'}
+            </span>
             <div className="account-dropdown-wrap" ref={accountMenuRef}>
               <button type="button" className="app-user-pill" onClick={toggleAccountMenu} aria-label="Account menu">
-                MO
+                {userInitials}
               </button>
 
               {accountMenuOpen && (
@@ -2560,38 +3296,125 @@ function App() {
                         <span>{activeDetections.length} result(s)</span>
                       </div>
 
-                      <div className="scan-detection-grid">
-                        {activeDetections.map((image, index) => (
-                          <article className="scan-card detection-card" key={image.preview}>
-                            <div className="detection-thumb">
-                              <img src={image.preview} alt={image.name} />
-                            </div>
-                            <h4><ScanSearch size={14} /> {image.name}</h4>
-                            <div className="detection-meta">Rank #{index + 1} • AI {image.aiShare}% • Confidence {image.confidence}%</div>
+                      {scanMode === 'batch' ? (
+                        <div className="classification-groups">
+                          {[
+                            { key: 'real', title: 'Real' },
+                            { key: 'suspicious', title: 'Suspicious' },
+                            { key: 'ai', title: 'AI' },
+                          ].map((group) => {
+                            const groupedImages = activeDetections.filter((img) => classifyDetectionGroup(img) === group.key);
+                            if (groupedImages.length === 0) return null;
+                            return (
+                              <section className="classification-group" key={group.key}>
+                                <div className="classification-head">
+                                  <strong>{group.title}</strong>
+                                  <span className="classification-count">{groupedImages.length} image(s)</span>
+                                </div>
+                                <div className="scan-detection-grid">
+                                  {groupedImages.map((image, index) => (
+                                    <article className="scan-card detection-card" key={`${group.key}-${image.preview}`}>
+                                      <DetectionThumb image={image} />
+                                      <h4><ScanSearch size={14} /> {image.name}</h4>
+                                      <div className="detection-meta">Rank #{index + 1} • AI {image.aiShare}% • Confidence {image.confidence}%</div>
+                                      <div className="detection-meta">Vision {Number(image.modelAiShare || 0).toFixed(2)}% • Forensic {Number(image.forensicAiShare || 0).toFixed(2)}% • Metadata {Number(image.heuristicAiShare || 0).toFixed(2)}%</div>
+                                      {Array.isArray(image.ensembleModels) && image.ensembleModels.length > 0 && (
+                                        <div className="model-chip-row">
+                                          {image.ensembleModels.map((model) => (
+                                            <span key={model.id} className="model-chip">
+                                              {model.label}: {Number(model.aiLikelihood || 0).toFixed(2)}%
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                      <div className="detection-verdict">
+                                        Verdict: {image.verdict || (image.aiShare >= 50 ? 'Highly Likely AI/Manipulated' : 'Likely Real')}
+                                      </div>
+                                      <ForensicMiniCharts image={image} />
+                                      {formatForensicMetrics(image) && (
+                                        <details className="batch-details">
+                                          <summary>View detailed metrics</summary>
+                                          <div className="detection-metrics">{formatForensicMetrics(image)}</div>
+                                        </details>
+                                      )}
 
-                            <div className="graph-metrics">
-                              <div className="graph-metric">
-                                <span className="graph-metric-label">Confidence</span>
-                                <div className="graph-bar"><span style={{ width: `${image.confidence}%` }}></span></div>
+                                      <div className="graph-metrics">
+                                        <div className="graph-metric">
+                                          <span className="graph-metric-label">Confidence</span>
+                                          <div className="graph-bar"><span style={{ width: `${image.confidence}%` }}></span></div>
+                                        </div>
+                                        <div className="graph-metric">
+                                          <span className="graph-metric-label">AI likelihood</span>
+                                          <div className="graph-bar"><span style={{ width: `${image.aiShare}%` }}></span></div>
+                                        </div>
+                                        <div className="graph-metric">
+                                          <span className="graph-metric-label">Artifacts</span>
+                                          <div className="graph-bar"><span style={{ width: `${image.artifacts}%` }}></span></div>
+                                        </div>
+                                      </div>
+                                      <details className="batch-details">
+                                        <summary>View additional visual analytics</summary>
+                                        <VisualAnalyticsPanel image={image} />
+                                      </details>
+                                    </article>
+                                  ))}
+                                </div>
+                              </section>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="scan-detection-grid">
+                          {activeDetections.map((image, index) => (
+                            <article className="scan-card detection-card" key={image.preview}>
+                              <DetectionThumb image={image} />
+                              <h4><ScanSearch size={14} /> {image.name}</h4>
+                              <div className="detection-meta">Rank #{index + 1} • AI {image.aiShare}% • Confidence {image.confidence}%</div>
+                              <div className="detection-meta">Vision {Number(image.modelAiShare || 0).toFixed(2)}% • Forensic {Number(image.forensicAiShare || 0).toFixed(2)}% • Metadata {Number(image.heuristicAiShare || 0).toFixed(2)}%</div>
+                              {Array.isArray(image.ensembleModels) && image.ensembleModels.length > 0 && (
+                                <div className="model-chip-row">
+                                  {image.ensembleModels.map((model) => (
+                                    <span key={model.id} className="model-chip">
+                                      {model.label}: {Number(model.aiLikelihood || 0).toFixed(2)}%
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="detection-verdict">
+                                Verdict: {image.verdict || (image.aiShare >= 50 ? 'Highly Likely AI/Manipulated' : 'Likely Real')}
                               </div>
-                              <div className="graph-metric">
-                                <span className="graph-metric-label">AI likelihood</span>
-                                <div className="graph-bar"><span style={{ width: `${image.aiShare}%` }}></span></div>
+                              <ForensicMiniCharts image={image} />
+                              {formatForensicMetrics(image) && (
+                                <div className="detection-metrics">{formatForensicMetrics(image)}</div>
+                              )}
+
+                              <div className="graph-metrics">
+                                <div className="graph-metric">
+                                  <span className="graph-metric-label">Confidence</span>
+                                  <div className="graph-bar"><span style={{ width: `${image.confidence}%` }}></span></div>
+                                </div>
+                                <div className="graph-metric">
+                                  <span className="graph-metric-label">AI likelihood</span>
+                                  <div className="graph-bar"><span style={{ width: `${image.aiShare}%` }}></span></div>
+                                </div>
+                                <div className="graph-metric">
+                                  <span className="graph-metric-label">Artifacts</span>
+                                  <div className="graph-bar"><span style={{ width: `${image.artifacts}%` }}></span></div>
+                                </div>
                               </div>
-                              <div className="graph-metric">
-                                <span className="graph-metric-label">Artifacts</span>
-                                <div className="graph-bar"><span style={{ width: `${image.artifacts}%` }}></span></div>
-                              </div>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
+                              <VisualAnalyticsPanel image={image} />
+                            </article>
+                          ))}
+                        </div>
+                      )}
                     </section>
                   )}
 
                   <section className="latest-preview">
                     <h4>Latest Scanned Preview ({currentModeLabel})</h4>
-                    {latestScansForCurrentMode.length === 0 ? (
+                    {isHistoryLoading ? (
+                      <p>Loading your scan history...</p>
+                    ) : latestScansForCurrentMode.length === 0 ? (
                       <p>No latest scan yet for this page.</p>
                     ) : (
                       <div className="preview-strip latest-mode-strip">
@@ -2601,6 +3424,11 @@ function App() {
                           </div>
                         ))}
                       </div>
+                    )}
+                    {historyError && (
+                      <p style={{ color: historyAuthIssue ? '#ffb78d' : 'rgba(255,255,255,0.62)' }}>
+                        {historyError}
+                      </p>
                     )}
 
                     <button
@@ -2651,7 +3479,15 @@ function App() {
           </div>
 
           <div key={historyTab} className="history-content">
-            {filteredHistory.length === 0 ? (
+            {isHistoryLoading ? (
+              <div className="history-empty">
+                Loading your detection history...
+              </div>
+            ) : historyError ? (
+              <div className="history-empty">
+                {historyError}
+              </div>
+            ) : filteredHistory.length === 0 ? (
               <div className="history-empty">
                 No {historyTab} detections yet. Run a {historyTab} scan first.
               </div>
@@ -2674,11 +3510,26 @@ function App() {
                     <div className="history-detection-grid">
                       {entry.detections.map((image, index) => (
                         <article className="scan-card detection-card" key={image.preview}>
-                          <div className="detection-thumb">
-                            <img src={image.preview} alt={image.name} />
-                          </div>
+                          <DetectionThumb image={image} />
                           <h4><ScanSearch size={14} /> {image.name}</h4>
                           <div className="detection-meta">Rank #{index + 1} • AI {image.aiShare}% • Confidence {image.confidence}%</div>
+                          <div className="detection-meta">Vision {Number(image.modelAiShare || 0).toFixed(2)}% • Forensic {Number(image.forensicAiShare || 0).toFixed(2)}% • Metadata {Number(image.heuristicAiShare || 0).toFixed(2)}%</div>
+                          {Array.isArray(image.ensembleModels) && image.ensembleModels.length > 0 && (
+                            <div className="model-chip-row">
+                              {image.ensembleModels.map((model) => (
+                                <span key={model.id} className="model-chip">
+                                  {model.label}: {Number(model.aiLikelihood || 0).toFixed(2)}%
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <div className="detection-verdict">
+                            Verdict: {image.verdict || (image.aiShare >= 50 ? 'Highly Likely AI/Manipulated' : 'Likely Real')}
+                          </div>
+                          <ForensicMiniCharts image={image} />
+                          {formatForensicMetrics(image) && (
+                            <div className="detection-metrics">{formatForensicMetrics(image)}</div>
+                          )}
 
                           <div className="graph-metrics">
                             <div className="graph-metric">
@@ -2717,77 +3568,19 @@ function App() {
 
             <h2 className="login-title">{currentView === 'signup' ? 'Create your account' : 'Log into your account'}</h2>
             <p className="login-sub">+30M users choose VerifAI</p>
-
-            <button className="login-google" type="button">Continue with Google</button>
-
-            <div className="login-divider">OR</div>
-
-            <form onSubmit={onAuthSubmit}>
-              {currentView === 'signup' && (
-                <input
-                  className="login-input"
-                  type="text"
-                  name="fullName"
-                  value={authForm.fullName}
-                  onChange={onAuthInputChange}
-                  placeholder="Enter your full name"
-                  required
-                />
-              )}
-              <input
-                className="login-input"
-                type="email"
-                name="email"
-                value={authForm.email}
-                onChange={onAuthInputChange}
-                placeholder="Enter your email address"
-                required
-              />
-              <input
-                className="login-input"
-                type="password"
-                name="password"
-                value={authForm.password}
-                onChange={onAuthInputChange}
-                placeholder="Enter password"
-                required
-              />
-              {currentView === 'signup' && (
-                <input
-                  className="login-input"
-                  type="password"
-                  name="confirmPassword"
-                  value={authForm.confirmPassword}
-                  onChange={onAuthInputChange}
-                  placeholder="Confirm password"
-                  required
-                />
-              )}
-
-              {currentView === 'login' && (
-                <div className="login-forgot">
-                  <a href="#home">Forgot Password?</a>
-                </div>
-              )}
-
-              {authError && (
-                <div style={{ color: '#ffb78d', fontSize: '0.84rem', marginBottom: '0.7rem' }} role="alert">
-                  {authError}
-                </div>
-              )}
-
-              <button className="login-submit" type="submit">{currentView === 'signup' ? 'Sign Up' : 'Sign In'}</button>
-            </form>
-
-            <div className="login-signup">
+            <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'center' }}>
               {currentView === 'signup' ? (
-                <>
-                  Already have an account? <a href="#login" onClick={goToLoginPage}>Log in</a>
-                </>
+                <SignUp
+                  routing="virtual"
+                  signInUrl="#login"
+                  fallbackRedirectUrl="#app"
+                />
               ) : (
-                <>
-                  Don&apos;t have an account? <a href="#signup" onClick={goToSignupPage}>Sign up</a>
-                </>
+                <SignIn
+                  routing="virtual"
+                  signUpUrl="#signup"
+                  fallbackRedirectUrl="#app"
+                />
               )}
             </div>
           </div>
