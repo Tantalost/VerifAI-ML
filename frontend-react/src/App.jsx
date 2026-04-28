@@ -3831,10 +3831,6 @@ function App() {
               </div>
             </div>
 
-            <button type="button" className="app-side-dot" onClick={goToBatchPage} aria-label="Batch detection" title="Batch detection">
-              <Link2 size={12} />
-              <span className="app-side-label">Batch Detection</span>
-            </button>
           </aside>
 
           <header className="app-top">
