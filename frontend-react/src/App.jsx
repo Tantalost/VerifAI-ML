@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Shield, Zap, CheckCircle, AlertTriangle, BrainCircuit, BarChart3, Gauge, Lock, ScanSearch, MapPinned, Plus, History, Link2, Plane, ImagePlus, Images, Sparkles, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { ArrowLeft, Shield, Zap, CheckCircle, AlertTriangle, BrainCircuit, BarChart3, Gauge, Lock, ScanSearch, MapPinned, Plus, History, Link2, ImagePlus, Images, Sparkles, ChevronsLeft, ChevronsRight, Search, X, Menu } from 'lucide-react';
 import { SignIn, SignUp, useAuth, useClerk, useUser } from '@clerk/clerk-react';
 import Orb from './components/Orb';
 import { createSupabaseClient } from './lib/supabaseClient';
@@ -663,6 +663,10 @@ function App() {
     setCurrentDetections([]);
   };
 
+  const removeImage = (previewToRemove) => {
+    setSelectedImages((prev) => prev.filter((img) => img.preview !== previewToRemove));
+  };
+
   const runScan = async () => {
     if (selectedImages.length === 0 || isScanning) return;
     if (!userId) {
@@ -827,6 +831,37 @@ function App() {
     ].join('\n');
   };
 
+  const clerkAppearance = useMemo(() => ({
+    variables: {
+      colorPrimary: '#ff6b00',
+      colorBackground: '#0a0a0a',
+      colorText: '#ffffff',
+      colorTextSecondary: 'rgba(255, 255, 255, 0.68)',
+      colorInputBackground: 'rgba(255, 255, 255, 0.03)',
+      colorInputText: '#ffffff',
+      borderRadius: '12px',
+    },
+    elements: {
+      card: 'cl-card',
+      rootBox: 'cl-rootBox',
+      cardBox: 'cl-cardBox',
+      form: 'cl-form',
+      headerTitle: 'cl-headerTitle',
+      headerSubtitle: 'cl-headerSubtitle',
+      formFieldLabel: 'cl-formFieldLabel',
+      formFieldInput: 'cl-formFieldInput',
+      formButtonPrimary: 'cl-formButtonPrimary',
+      socialButtonsBlockButton: 'cl-socialButtonsBlockButton',
+      socialButtonsBlockButtonText: 'cl-socialButtonsBlockButtonText',
+      dividerLine: 'cl-dividerLine',
+      dividerText: 'cl-dividerText',
+      footerAction: 'cl-footerAction',
+      footerActionText: 'cl-footerActionText',
+      identityPreviewText: 'cl-identityPreviewText',
+      identityPreviewEditButton: 'cl-identityPreviewEditButton',
+    },
+  }), []);
+
   const embeddedStyles = useMemo(
     () => `
       :root {
@@ -984,17 +1019,27 @@ function App() {
         text-decoration: none;
         color: var(--text);
         font-weight: 700;
+        letter-spacing: 0.02em;
       }
 
       .brand-icon {
-        width: 28px;
-        height: 28px;
-        border-radius: 7px;
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        border: 1px solid rgba(255, 107, 0, 0.35);
-        background: rgba(255, 107, 0, 0.1);
+        border: 1.5px solid rgba(255, 107, 0, 0.48);
+        background: linear-gradient(135deg, rgba(255, 107, 0, 0.16), rgba(255, 107, 0, 0.08));
+        box-shadow: 0 0 16px rgba(255, 107, 0, 0.18), inset 0 1px 2px rgba(255, 255, 255, 0.1);
+        transition: all 0.3s ease;
+      }
+
+      .brand:hover .brand-icon {
+        border-color: rgba(255, 107, 0, 0.68);
+        background: linear-gradient(135deg, rgba(255, 107, 0, 0.22), rgba(255, 107, 0, 0.12));
+        box-shadow: 0 0 24px rgba(255, 107, 0, 0.28), inset 0 1px 2px rgba(255, 255, 255, 0.12);
+        transform: translateY(-2px);
       }
 
       .ai-chip {
@@ -1464,18 +1509,27 @@ function App() {
         display: inline-flex;
         align-items: center;
         gap: 0.62rem;
-        color: rgba(255, 255, 255, 0.9);
-        font-weight: 700;
+        color: rgba(255, 255, 255, 0.92);
+        font-weight: 800;
+        letter-spacing: 0.02em;
       }
 
       .footer-brand-mark {
-        width: 19px;
-        height: 19px;
-        border-radius: 4px;
-        border: 1px solid rgba(255, 255, 255, 0.35);
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
+        border: 1.5px solid rgba(255, 107, 0, 0.48);
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        background: rgba(255, 107, 0, 0.08);
+        transition: all 0.3s ease;
+      }
+
+      .footer-brand:hover .footer-brand-mark {
+        border-color: rgba(255, 107, 0, 0.68);
+        background: rgba(255, 107, 0, 0.14);
+        box-shadow: 0 0 16px rgba(255, 107, 0, 0.2);
       }
 
       .footer-cols {
@@ -1531,6 +1585,19 @@ function App() {
         position: relative;
       }
 
+      .login-page::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background:
+          radial-gradient(circle at 50% 20%, rgba(255, 107, 0, 0.12) 0%, rgba(255, 107, 0, 0) 50%);
+        pointer-events: none;
+        z-index: 0;
+      }
+
       .login-close {
         position: fixed;
         right: 1.6rem;
@@ -1543,89 +1610,85 @@ function App() {
       }
 
       .login-card {
-        width: min(100%, 400px);
-        border-radius: 10px;
-        background: linear-gradient(180deg, rgba(8, 8, 8, 0.98) 0%, rgba(2, 2, 2, 0.98) 100%);
-        border: 1px solid rgba(255, 107, 0, 0.28);
-        box-shadow: 0 26px 58px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 107, 0, 0.08) inset;
-        padding: 1.1rem 1.1rem 1.25rem;
+        width: min(100%, 440px);
+        border-radius: 18px;
+        background: linear-gradient(135deg, rgba(12, 12, 18, 0.98) 0%, rgba(6, 6, 10, 0.98) 100%);
+        border: 1.5px solid rgba(255, 107, 0, 0.38);
+        box-shadow: 0 32px 64px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 107, 0, 0.14) inset, 0 0 48px rgba(255, 107, 0, 0.1);
+        padding: 2.2rem 2rem 2.4rem;
+        backdrop-filter: blur(12px);
+        position: relative;
+        z-index: 10;
       }
 
       .login-brand {
         display: inline-flex;
         align-items: center;
-        gap: 0.58rem;
-        color: rgba(255, 255, 255, 0.9);
-        font-weight: 700;
+        gap: 0.8rem;
+        color: rgba(255, 255, 255, 0.98);
+        font-weight: 800;
+        font-size: 1.05rem;
+        letter-spacing: 0.04em;
       }
 
       .login-brand .footer-brand-mark {
-        border-color: rgba(255, 107, 0, 0.44);
+        border: 1.5px solid rgba(255, 107, 0, 0.58);
         color: #ff6b00;
-      }
-
-      .login-brand .footer-brand-mark {
-        width: 18px;
-        height: 18px;
+        background: rgba(255, 107, 0, 0.08);
+        box-shadow: 0 0 14px rgba(255, 107, 0, 0.22);
+        width: 22px;
+        height: 22px;
       }
 
       .login-title {
-        margin: 0.9rem 0 0;
-        font-size: 2rem;
+        margin: 1.4rem 0 0;
+        font-size: 2.4rem;
         font-family: 'Inter Tight', Inter, sans-serif;
-        letter-spacing: -0.02em;
-        color: rgba(255, 255, 255, 0.97);
+        letter-spacing: -0.03em;
+        color: rgba(255, 255, 255, 0.99);
+        line-height: 1.15;
+        font-weight: 900;
       }
 
       .login-sub {
-        margin: 0.38rem 0 0;
-        color: rgba(255, 255, 255, 0.46);
-        font-size: 0.9rem;
+        margin: 0.7rem 0 0;
+        color: rgba(255, 255, 255, 0.58);
+        font-size: 0.92rem;
+        letter-spacing: 0.01em;
       }
 
       .login-google {
-        margin-top: 1.15rem;
+        margin-top: 1.4rem;
         width: 100%;
-        height: 44px;
-        border-radius: 8px;
-        border: 1px solid rgba(255, 107, 0, 0.28);
-        background: rgba(255, 107, 0, 0.06);
-        color: rgba(255, 255, 255, 0.95);
-        font-weight: 600;
-        cursor: pointer;
-      }
-
-      .latest-mode-strip {
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-      }
-
-      .view-more-btn {
-        margin-top: 0.75rem;
-        height: 36px;
+        height: 46px;
         border-radius: 10px;
-        border: 1px solid rgba(255, 107, 0, 0.4);
-        background: rgba(255, 107, 0, 0.12);
-        color: rgba(255, 255, 255, 0.93);
-        padding: 0 0.8rem;
+        border: 1px solid rgba(255, 107, 0, 0.32);
+        background: rgba(255, 107, 0, 0.08);
+        color: rgba(255, 255, 255, 0.97);
+        font-weight: 700;
+        font-size: 0.95rem;
         cursor: pointer;
-        font-weight: 600;
-      }
-
-      .view-more-btn:hover {
-        background: rgba(255, 107, 0, 0.2);
+        transition: all 0.3s ease;
       }
 
       .login-google:hover {
-        background: rgba(255, 107, 0, 0.12);
+        background: rgba(255, 107, 0, 0.16);
+        border-color: rgba(255, 107, 0, 0.48);
+        box-shadow: 0 0 20px rgba(255, 107, 0, 0.15);
+        transform: translateY(-2px);
+      }
+
+      .login-google:active {
+        transform: translateY(0);
       }
 
       .login-divider {
-        margin: 0.95rem 0;
+        margin: 1.2rem 0;
         display: flex;
         align-items: center;
-        gap: 0.6rem;
-        color: rgba(255, 255, 255, 0.72);
-        font-size: 0.82rem;
+        gap: 0.8rem;
+        color: rgba(255, 255, 255, 0.78);
+        font-size: 0.85rem;
         font-weight: 700;
       }
 
@@ -1634,65 +1697,172 @@ function App() {
         content: '';
         flex: 1;
         height: 1px;
-        background: rgba(255, 107, 0, 0.22);
+        background: rgba(255, 107, 0, 0.24);
       }
 
       .login-input {
         width: 100%;
-        height: 42px;
-        border-radius: 7px;
-        border: 1px solid rgba(255, 107, 0, 0.2);
-        background: rgba(255, 107, 0, 0.03);
+        height: 46px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 107, 0, 0.22);
+        background: rgba(255, 107, 0, 0.04);
         color: #fff;
-        padding: 0 0.82rem;
-        margin-bottom: 0.72rem;
+        padding: 0 1rem;
+        margin-bottom: 0.85rem;
+        font-size: 0.95rem;
+        transition: all 0.3s ease;
       }
 
       .login-input:focus {
         outline: none;
-        border-color: rgba(255, 107, 0, 0.58);
-        box-shadow: 0 0 0 3px rgba(255, 107, 0, 0.14);
+        border-color: rgba(255, 107, 0, 0.64);
+        background: rgba(255, 107, 0, 0.06);
+        box-shadow: 0 0 0 4px rgba(255, 107, 0, 0.14);
       }
 
       .login-input::placeholder {
-        color: rgba(255, 255, 255, 0.42);
+        color: rgba(255, 255, 255, 0.48);
       }
 
       .login-forgot {
         text-align: right;
-        margin-bottom: 0.7rem;
+        margin-bottom: 0.85rem;
       }
 
       .login-forgot a {
-        color: rgba(255, 182, 132, 0.9);
-        font-size: 0.79rem;
+        color: rgba(255, 180, 120, 0.95);
+        font-size: 0.82rem;
         text-decoration: none;
+        transition: color 0.2s ease;
+      }
+
+      .login-forgot a:hover {
+        color: rgba(255, 200, 150, 0.95);
       }
 
       .login-submit {
         width: 100%;
-        height: 42px;
+        height: 46px;
         border: none;
-        border-radius: 7px;
+        border-radius: 10px;
         font-weight: 700;
-        background: #ff6b00;
+        font-size: 0.96rem;
+        background: linear-gradient(135deg, #ff6b00, #ff8c42);
         color: #110b07;
         cursor: pointer;
+        transition: all 0.3s ease;
+        letter-spacing: 0.02em;
       }
 
       .login-submit:hover {
-        background: #ff7e26;
+        background: linear-gradient(135deg, #ff7e26, #ffa070);
+        box-shadow: 0 8px 24px rgba(255, 107, 0, 0.3);
+        transform: translateY(-2px);
+      }
+
+      .login-submit:active {
+        transform: translateY(0);
       }
 
       .login-signup {
         text-align: center;
-        margin-top: 1rem;
-        color: rgba(255, 255, 255, 0.58);
-        font-size: 0.84rem;
+        margin-top: 1.2rem;
+        color: rgba(255, 255, 255, 0.64);
+        font-size: 0.88rem;
       }
 
       .login-signup a {
-        color: rgba(255, 184, 138, 0.95);
+        color: rgba(255, 184, 138, 0.98);
+        font-weight: 700;
+        text-decoration: none;
+        transition: color 0.2s ease;
+      }
+
+      .login-signup a:hover {
+        color: rgba(255, 200, 150, 0.98);
+      }
+
+      .clerk-auth-wrap {
+        margin-top: 1rem;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        transform: translateX(-14px);
+      }
+
+      .clerk-auth-wrap .cl-rootBox,
+      .clerk-auth-wrap .cl-card,
+      .clerk-auth-wrap .cl-internal-cdbsvj,
+      .clerk-auth-wrap .cl-internal-1dauvpw,
+      .clerk-auth-wrap .cl-internal-1b3zmvc {
+        width: 100%;
+      }
+
+      .clerk-auth-wrap .cl-rootBox {
+        max-width: 100%;
+      }
+
+      .clerk-auth-wrap .cl-card {
+        background: transparent;
+        border: none;
+        box-shadow: none;
+        padding: 0;
+      }
+
+      .clerk-auth-wrap .cl-headerTitle,
+      .clerk-auth-wrap .cl-headerSubtitle,
+      .clerk-auth-wrap .cl-formFieldLabel,
+      .clerk-auth-wrap .cl-socialButtonsBlockButtonText,
+      .clerk-auth-wrap .cl-footerAction,
+      .clerk-auth-wrap .cl-footerActionText,
+      .clerk-auth-wrap .cl-identityPreviewText,
+      .clerk-auth-wrap .cl-identityPreviewEditButton {
+        color: rgba(255, 255, 255, 0.94) !important;
+      }
+
+      .clerk-auth-wrap .cl-formFieldInput {
+        background: rgba(255, 255, 255, 0.03) !important;
+        border: 1px solid rgba(255, 107, 0, 0.18) !important;
+        color: #ffffff !important;
+        box-shadow: none !important;
+      }
+
+      .clerk-auth-wrap .cl-formFieldInput:focus {
+        border-color: rgba(255, 107, 0, 0.62) !important;
+        box-shadow: 0 0 0 4px rgba(255, 107, 0, 0.14) !important;
+      }
+
+      .clerk-auth-wrap .cl-socialButtonsBlockButton,
+      .clerk-auth-wrap .cl-formButtonPrimary {
+        background: linear-gradient(135deg, #ff6b00, #ff8a3d) !important;
+        color: #140b05 !important;
+        border: none !important;
+        box-shadow: 0 8px 24px rgba(255, 107, 0, 0.22) !important;
+      }
+
+      .clerk-auth-wrap .cl-socialButtonsBlockButton:hover,
+      .clerk-auth-wrap .cl-formButtonPrimary:hover {
+        background: linear-gradient(135deg, #ff7a1c, #ff9b55) !important;
+        transform: translateY(-2px);
+      }
+
+      .clerk-auth-wrap .cl-dividerLine {
+        background: rgba(255, 107, 0, 0.2) !important;
+      }
+
+      .clerk-auth-wrap .cl-dividerText {
+        color: rgba(255, 255, 255, 0.56) !important;
+      }
+
+      .clerk-auth-wrap .cl-cardBox,
+      .clerk-auth-wrap .cl-rootBox,
+      .clerk-auth-wrap .cl-form {
+        background: transparent !important;
+      }
+
+      .clerk-auth-wrap .cl-card,
+      .clerk-auth-wrap .cl-rootBox {
+        margin: 0 auto !important;
       }
 
       .app-shell {
@@ -2057,19 +2227,87 @@ function App() {
         top: 0;
         bottom: 0;
         width: 190px;
-        border-right: 1px solid rgba(255, 255, 255, 0.1);
+        border-right: 1px solid rgba(255, 107, 0, 0.15);
         display: flex;
         flex-direction: column;
         align-items: stretch;
         gap: 0.9rem;
-        padding-top: 1rem;
+        padding-top: 0.8rem;
         padding-left: 0.55rem;
         padding-right: 0.55rem;
-        background: linear-gradient(180deg, rgba(20, 20, 25, 0.8) 0%, rgba(0, 0, 0, 0.62) 100%);
-        backdrop-filter: blur(10px);
+        background: linear-gradient(180deg, rgba(15, 15, 22, 0.88) 0%, rgba(8, 8, 12, 0.72) 100%);
+        backdrop-filter: blur(12px);
         z-index: 40;
         transition: width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), padding 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s ease;
-        box-shadow: 2px 0 12px rgba(0, 0, 0, 0.4);
+        box-shadow: 2px 0 16px rgba(0, 0, 0, 0.5);
+      }
+
+      .app-side-branding {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        height: 44px;
+        padding: 0 0.65rem;
+        margin-bottom: 0.3rem;
+      }
+
+      .app-side-burger {
+        width: 44px;
+        height: 44px;
+        border: 1px solid rgba(255, 107, 0, 0.28);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.04);
+        color: rgba(255, 255, 255, 0.74);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        padding: 0;
+        flex-shrink: 0;
+      }
+
+      .app-side-burger:hover {
+        border-color: rgba(255, 107, 0, 0.68);
+        background: linear-gradient(135deg, rgba(255, 107, 0, 0.16), rgba(255, 107, 0, 0.08));
+        color: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 0 20px rgba(255, 107, 0, 0.3), inset 0 1px 2px rgba(255, 255, 255, 0.12), 0 4px 12px rgba(255, 107, 0, 0.18);
+        transform: translateX(4px);
+      }
+
+      .app-side-burger:active {
+        transform: translateX(2px) scale(0.98);
+      }
+
+      .app-side-branding-text {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.86);
+        font-size: 0.78rem;
+        letter-spacing: 0.02em;
+        overflow: hidden;
+        white-space: nowrap;
+        flex: 1;
+      }
+
+      .app-side-branding-text svg {
+        flex-shrink: 0;
+        color: rgba(255, 107, 0, 0.7);
+      }
+
+      .app-side-branding-text span {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+      }
+
+      .app-shell.sidebar-collapsed .app-side-branding-text {
+        opacity: 0;
+        width: 0;
+        overflow: hidden;
+        display: none;
       }
 
       .app-side-item {
@@ -2122,10 +2360,17 @@ function App() {
       .app-side-dot:hover,
       .app-side-item:focus-within .app-side-dot {
         color: rgba(255, 255, 255, 0.95);
-        border-color: rgba(255, 107, 0, 0.6);
-        background: linear-gradient(135deg, rgba(255, 107, 0, 0.12), rgba(255, 107, 0, 0.06));
+        border-color: rgba(255, 107, 0, 0.68);
+        background: linear-gradient(135deg, rgba(255, 107, 0, 0.16), rgba(255, 107, 0, 0.08));
         transform: translateX(4px);
-        box-shadow: 0 0 20px rgba(255, 107, 0, 0.3), inset 0 1px 2px rgba(255, 255, 255, 0.1), 0 4px 12px rgba(255, 107, 0, 0.15);
+        box-shadow: 0 0 24px rgba(255, 107, 0, 0.35), inset 0 1px 2px rgba(255, 255, 255, 0.12), 0 4px 12px rgba(255, 107, 0, 0.18);
+      }
+
+      .app-side-dot.active {
+        color: rgba(255, 255, 255, 0.98);
+        border-color: rgba(255, 107, 0, 0.78);
+        background: linear-gradient(135deg, rgba(255, 107, 0, 0.22), rgba(255, 107, 0, 0.12));
+        box-shadow: 0 0 28px rgba(255, 107, 0, 0.42), inset 0 1px 2px rgba(255, 255, 255, 0.15), 0 6px 18px rgba(255, 107, 0, 0.22);
       }
 
       .app-shell.sidebar-collapsed .app-side-dot:hover,
@@ -2143,10 +2388,10 @@ function App() {
         top: -2px;
         width: 240px;
         border-radius: 12px;
-        border: 1px solid rgba(255, 107, 0, 0.15);
-        background: rgba(30, 31, 38, 0.98);
-        backdrop-filter: blur(8px);
-        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 20px rgba(255, 107, 0, 0.1);
+        border: 1px solid rgba(255, 107, 0, 0.18);
+        background: rgba(20, 20, 28, 0.98);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55), 0 0 24px rgba(255, 107, 0, 0.14);
         padding: 0.85rem;
         opacity: 0;
         visibility: hidden;
@@ -2160,7 +2405,7 @@ function App() {
         opacity: 1;
         visibility: visible;
         transform: translateY(0) scale(1);
-        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6), 0 0 30px rgba(255, 107, 0, 0.15);
+        box-shadow: 0 26px 52px rgba(0, 0, 0, 0.65), 0 0 32px rgba(255, 107, 0, 0.18);
       }
 
       .app-side-pop h5 {
@@ -2172,7 +2417,7 @@ function App() {
       .app-side-pop p {
         margin: 0.55rem 0 0;
         font-size: 0.8rem;
-        color: rgba(255, 255, 255, 0.62);
+        color: rgba(255, 255, 255, 0.64);
         line-height: 1.45;
       }
 
@@ -2220,10 +2465,10 @@ function App() {
       }
 
       .app-side-pop .see-all:hover {
-        color: rgba(255, 107, 0, 0.9);
-        background: rgba(255, 107, 0, 0.08);
+        color: rgba(255, 107, 0, 0.95);
+        background: rgba(255, 107, 0, 0.1);
         transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(255, 107, 0, 0.15);
+        box-shadow: 0 4px 12px rgba(255, 107, 0, 0.18);
       }
 
       .app-side-pop .see-all:active {
@@ -2452,6 +2697,53 @@ function App() {
         gap: 0.6rem;
       }
 
+      .detect-start-btn {
+        margin-top: 0;
+        height: 46px;
+        border-radius: 12px;
+        border: 1.5px solid rgba(255, 107, 0, 0.48);
+        background: linear-gradient(135deg, rgba(255, 107, 0, 0.12), rgba(255, 107, 0, 0.06));
+        color: rgba(255, 255, 255, 0.95);
+        padding: 0 1.2rem;
+        font-weight: 700;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        width: 100%;
+        transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .detect-start-btn::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+        transition: left 0.5s ease;
+      }
+
+      .detect-start-btn:hover::before {
+        left: 100%;
+      }
+
+      .detect-start-btn:hover {
+        border-color: rgba(255, 107, 0, 0.78);
+        background: linear-gradient(135deg, rgba(255, 107, 0, 0.2), rgba(255, 107, 0, 0.12));
+        box-shadow: 0 0 28px rgba(255, 107, 0, 0.35), inset 0 1px 2px rgba(255, 255, 255, 0.12), 0 6px 16px rgba(255, 107, 0, 0.22);
+        transform: translateY(-3px);
+        color: rgba(255, 255, 255, 0.99);
+      }
+
+      .detect-start-btn:active {
+        transform: translateY(-1px);
+      }
+
       .detect-logo {
         display: flex;
         align-items: center;
@@ -2479,29 +2771,6 @@ function App() {
         gap: 0.5rem;
         align-items: center;
         overflow: visible;
-      }
-
-      .detect-start-btn {
-        margin-top: 1rem;
-        height: 42px;
-        border-radius: 999px;
-        border: 1px solid rgba(255, 107, 0, 0.45);
-        background: rgba(255, 107, 0, 0.12);
-        color: rgba(255, 255, 255, 0.95);
-        padding: 0 1.1rem;
-        font-weight: 700;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.45rem;
-        margin-left: auto;
-        margin-right: auto;
-      }
-
-      .detect-split-actions .detect-start-btn {
-        width: 100%;
-        margin: 0;
       }
 
       .history-tabs {
@@ -2545,14 +2814,23 @@ function App() {
         position: relative;
         height: 40px;
         border-radius: 999px;
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 107, 0, 0.24);
+        background: rgba(255, 107, 0, 0.06);
         display: flex;
         align-items: center;
         justify-content: flex-start;
-        gap: 0.5rem;
-        padding: 0 0.8rem;
-        color: rgba(255, 255, 255, 0.64);
+        gap: 0.6rem;
+        padding: 0 0.95rem;
+        color: rgba(255, 255, 255, 0.74);
+        font-size: 0.88rem;
+        transition: all 0.2s ease;
+        cursor: pointer;
+      }
+
+      .detect-uploader:hover {
+        border-color: rgba(255, 107, 0, 0.48);
+        background: rgba(255, 107, 0, 0.12);
+        color: rgba(255, 255, 255, 0.88);
       }
 
       .detect-uploader input {
@@ -2773,12 +3051,54 @@ function App() {
         border: 1px solid rgba(255, 255, 255, 0.16);
         overflow: hidden;
         background: rgba(255, 255, 255, 0.03);
+        position: relative;
+        transition: all 0.2s ease;
+      }
+
+      .preview-item:hover {
+        border-color: rgba(255, 107, 0, 0.4);
+        box-shadow: 0 4px 12px rgba(255, 107, 0, 0.15);
       }
 
       .preview-item img {
         width: 100%;
         height: 100%;
         object-fit: cover;
+        display: block;
+      }
+
+      .preview-item-remove {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        border: none;
+        background: rgba(255, 107, 0, 0.9);
+        color: #fff;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0;
+        transform: scale(0.8);
+        transition: all 0.2s ease;
+        z-index: 10;
+      }
+
+      .preview-item:hover .preview-item-remove {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      .preview-item-remove:hover {
+        background: rgba(255, 60, 60, 0.95);
+        transform: scale(1.1);
+      }
+
+      .preview-item-remove:active {
+        transform: scale(0.95);
       }
 
       .scan-results {
@@ -3366,6 +3686,10 @@ function App() {
           font-size: 1.75rem;
         }
 
+        .clerk-auth-wrap {
+          transform: translateX(0);
+        }
+
         .footer-cta {
           padding: 3.1rem 0.9rem 2.8rem;
         }
@@ -3449,23 +3773,24 @@ function App() {
       {currentView === 'app' || isDetectionPage ? (
         <section className={`app-shell ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`} id="app">
           <aside className="app-sidebar" aria-label="App quick actions">
-            <button
-              type="button"
-              className="app-side-dot"
-              onClick={toggleSidebar}
-              aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            >
-              {isSidebarCollapsed ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />}
-              <span className="app-side-label">{isSidebarCollapsed ? 'Expand' : 'Collapse'}</span>
-            </button>
-            <span className="app-side-dot" aria-hidden="true">
-              <Shield size={12} />
-              <span className="app-side-label">VerifAI</span>
-            </span>
+            <div className="app-side-branding">
+              <button
+                type="button"
+                className="app-side-burger"
+                onClick={toggleSidebar}
+                aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              >
+                {isSidebarCollapsed ? <ChevronsRight size={16} /> : <Menu size={16} />}
+              </button>
+              <span className="app-side-branding-text" aria-hidden="true">
+                <Shield size={14} />
+                <span>VerifAI</span>
+              </span>
+            </div>
 
             <div className="app-side-item">
-              <button type="button" className="app-side-dot" onClick={startNewDetection} aria-label="New detection" title="New detection">
+              <button type="button" className={`app-side-dot ${currentView === 'app' || currentView === 'single' || currentView === 'batch' ? 'active' : ''}`} onClick={startNewDetection} aria-label="New detection" title="New detection">
                 <Plus size={13} />
                 <span className="app-side-label">New Detection</span>
               </button>
@@ -3476,7 +3801,7 @@ function App() {
             </div>
 
             <div className="app-side-item">
-              <button type="button" className="app-side-dot" onClick={(event) => goToHistoryPage(event, scanMode)} aria-label="Detection history" title="Detection history">
+              <button type="button" className={`app-side-dot ${currentView === 'history' ? 'active' : ''}`} onClick={(event) => goToHistoryPage(event, scanMode)} aria-label="Detection history" title="Detection history">
                 <History size={13} />
                 <span className="app-side-label">History</span>
               </button>
@@ -3570,13 +3895,13 @@ function App() {
 
                   <div className="detect-panel">
                     <label className="detect-uploader">
-                      {scanMode === 'single' ? <ImagePlus size={16} /> : <Images size={16} />}
-                      <span>{selectedImages.length > 0 ? `${selectedImages.length} image(s) selected` : `Upload image(s) for ${scanMode} detection`}</span>
+                      <Search size={16} />
+                      <span>{selectedImages.length > 0 ? `${selectedImages.length} image(s) selected` : `Search for image(s) to ${scanMode} detect`}</span>
                       <input type="file" accept="image/*" multiple={scanMode === 'batch'} onChange={onUploadImages} />
                     </label>
 
                     <button className="detect-scan" type="button" onClick={runScan} disabled={isScanning} aria-label="Scan images">
-                      <Plane size={16} />
+                      <Search size={16} />
                     </button>
                   </div>
 
@@ -3585,6 +3910,15 @@ function App() {
                       {selectedImages.map((item) => (
                         <div className="preview-item" key={item.preview}>
                           <img src={item.preview} alt={item.name} />
+                          <button
+                            type="button"
+                            className="preview-item-remove"
+                            onClick={() => removeImage(item.preview)}
+                            aria-label={`Remove ${item.name}`}
+                            title={`Remove ${item.name}`}
+                          >
+                            <X size={14} />
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -3918,18 +4252,20 @@ function App() {
 
             <h2 className="login-title">{currentView === 'signup' ? 'Create your account' : 'Log into your account'}</h2>
             <p className="login-sub">+30M users choose VerifAI</p>
-            <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'center' }}>
+            <div className="clerk-auth-wrap">
               {currentView === 'signup' ? (
                 <SignUp
                   routing="virtual"
                   signInUrl="#login"
                   fallbackRedirectUrl="#app"
+                  appearance={clerkAppearance}
                 />
               ) : (
                 <SignIn
                   routing="virtual"
                   signUpUrl="#signup"
                   fallbackRedirectUrl="#app"
+                  appearance={clerkAppearance}
                 />
               )}
             </div>
