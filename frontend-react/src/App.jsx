@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Shield, Zap, CheckCircle, BrainCircuit, BarChart3, Gauge, Lock, ScanSearch, MapPinned, Plus, History, Link2, Plane, ImagePlus, Images, Sparkles, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { ArrowLeft, Shield, Zap, CheckCircle, AlertTriangle, BrainCircuit, BarChart3, Gauge, Lock, ScanSearch, MapPinned, Plus, History, Link2, Plane, ImagePlus, Images, Sparkles, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { SignIn, SignUp, useAuth, useClerk, useUser } from '@clerk/clerk-react';
 import Orb from './components/Orb';
 import { createSupabaseClient } from './lib/supabaseClient';
@@ -444,6 +444,7 @@ function App() {
   const [historyError, setHistoryError] = useState('');
   const [historyAuthIssue, setHistoryAuthIssue] = useState(false);
   const [historyTab, setHistoryTab] = useState('single');
+  const [zoomedPreviewKey, setZoomedPreviewKey] = useState(null);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const accountMenuRef = useRef(null);
@@ -710,7 +711,9 @@ function App() {
           // Keep inference identical between single and batch mode.
           // Batch mode should only change presentation/grouping, not verdict logic.
           const inference = await runModelInference({ file: image.file });
-          const detectionResult = inference.detectionResult;
+          const detectionResult = mode === 'batch'
+            ? `[batch] ${inference.detectionResult}`
+            : `[single] ${inference.detectionResult}`;
 
           try {
             await insertScanHistoryRecord({
@@ -719,6 +722,12 @@ function App() {
               imageUrl: publicUrlData.publicUrl,
               detectionResult,
               confidenceScore: inference.confidenceScore,
+              aiShare: inference.aiLikelihood,
+              modelAiShare: inference.modelAiLikelihood,
+              forensicAiShare: inference.forensicAiLikelihood,
+              heuristicAiShare: inference.heuristicAiLikelihood,
+              ensembleModels: inference.ensembleModels || [],
+              forensicMetrics: inference.forensicMetrics || null,
             });
           } catch (historyInsertError) {
             // Keep inference UX functional even when history persistence is blocked by auth/policy config.
@@ -1578,6 +1587,14 @@ function App() {
         margin-top: 1.15rem;
         width: 100%;
         height: 44px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 107, 0, 0.28);
+        background: rgba(255, 107, 0, 0.06);
+        color: rgba(255, 255, 255, 0.95);
+        font-weight: 600;
+        cursor: pointer;
+      }
+
       .latest-mode-strip {
         grid-template-columns: repeat(5, minmax(0, 1fr));
       }
@@ -1596,12 +1613,6 @@ function App() {
 
       .view-more-btn:hover {
         background: rgba(255, 107, 0, 0.2);
-      }
-        border: 1px solid rgba(255, 107, 0, 0.28);
-        background: rgba(255, 107, 0, 0.06);
-        color: rgba(255, 255, 255, 0.95);
-        font-weight: 600;
-        cursor: pointer;
       }
 
       .login-google:hover {
@@ -1736,16 +1747,17 @@ function App() {
 
       .history-grid {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 1rem;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1.1rem;
       }
 
       .history-card {
-        border: 1px solid rgba(255, 255, 255, 0.11);
-        border-radius: 18px;
-        background: rgba(15, 15, 15, 0.9);
-        padding: 1rem;
-        box-shadow: 0 18px 34px rgba(0, 0, 0, 0.34);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 14px;
+        background: linear-gradient(180deg, rgba(14, 14, 16, 0.95), rgba(6, 6, 7, 0.94));
+        padding: 0;
+        overflow: hidden;
+        box-shadow: 0 14px 26px rgba(0, 0, 0, 0.34);
       }
 
       .history-card-head {
@@ -1753,7 +1765,8 @@ function App() {
         align-items: flex-start;
         justify-content: space-between;
         gap: 1rem;
-        margin-bottom: 0.9rem;
+        padding: 0.85rem 0.9rem 0.75rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       }
 
       .history-card-head h3 {
@@ -1763,9 +1776,9 @@ function App() {
       }
 
       .history-card-head p {
-        margin: 0.3rem 0 0;
+        margin: 0.2rem 0 0;
         color: rgba(255, 255, 255, 0.58);
-        font-size: 0.82rem;
+        font-size: 0.74rem;
       }
 
       .history-badge {
@@ -1776,6 +1789,163 @@ function App() {
         font-size: 0.75rem;
         padding: 0.35rem 0.7rem;
         white-space: nowrap;
+      }
+
+      .history-spotlight {
+        padding: 0.85rem;
+      }
+
+      .history-preview-shell {
+        position: relative;
+        aspect-ratio: 4 / 3;
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.03);
+        cursor: zoom-in;
+        transition: transform 0.22s ease, box-shadow 0.22s ease;
+      }
+
+      .history-preview-shell img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        transition: transform 0.22s ease;
+      }
+
+      .history-preview-shell.is-zoomed,
+      .latest-preview-card.is-zoomed {
+        transform: scale(1.02);
+        box-shadow: 0 12px 26px rgba(0, 0, 0, 0.44);
+      }
+
+      .history-preview-shell.is-zoomed img,
+      .latest-preview-card.is-zoomed img {
+        transform: scale(1.05);
+      }
+
+      .history-preview-empty {
+        min-height: 100%;
+        display: grid;
+        place-items: center;
+        color: rgba(255, 255, 255, 0.56);
+        font-size: 0.88rem;
+      }
+
+      .history-front-shadow {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 0.35rem;
+        padding: 0.95rem;
+        background: linear-gradient(180deg, rgba(6, 6, 7, 0.02) 20%, rgba(6, 6, 7, 0.64) 64%, rgba(6, 6, 7, 0.9) 100%);
+        transition: opacity 0.26s ease, transform 0.26s ease;
+      }
+
+      .history-preview-shell:hover .history-front-shadow,
+      .latest-preview-card:hover .history-front-shadow {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      .history-shadow-title {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        color: rgba(255, 255, 255, 0.98);
+        font-size: 0.9rem;
+        font-weight: 700;
+      }
+
+      .history-shadow-meta {
+        color: rgba(255, 255, 255, 0.78);
+        font-size: 0.77rem;
+      }
+
+      .history-card-body {
+        padding: 0.8rem 0.9rem 0.95rem;
+        border-top: 1px solid rgba(255, 255, 255, 0.07);
+      }
+
+      .history-quick-facts {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.65rem;
+      }
+
+      .history-fact {
+        padding: 0;
+      }
+
+      .history-fact strong {
+        display: block;
+        color: rgba(255, 255, 255, 0.96);
+        font-size: 0.78rem;
+        font-weight: 600;
+      }
+
+      .history-fact span {
+        color: rgba(255, 255, 255, 0.62);
+        font-size: 0.7rem;
+      }
+
+      .history-verdict {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        margin-bottom: 0.6rem;
+        font-size: 0.92rem;
+        font-weight: 700;
+      }
+
+      .history-verdict.real {
+        color: #c9ffcf;
+      }
+
+      .history-verdict.real svg {
+        color: #52d970;
+      }
+
+      .history-verdict.alert {
+        color: #ffd5c0;
+      }
+
+      .history-verdict.alert svg {
+        color: #ff7e43;
+      }
+
+      .history-progress {
+        margin-top: 0.8rem;
+        display: grid;
+        gap: 0.5rem;
+      }
+
+      .history-progress-row {
+        display: grid;
+        grid-template-columns: 90px 1fr 42px;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.74rem;
+        color: rgba(255, 255, 255, 0.72);
+      }
+
+      .history-progress-row strong {
+        font-size: 0.76rem;
+        color: rgba(255, 255, 255, 0.92);
+        text-align: right;
+      }
+
+      .history-progress-row .graph-bar {
+        height: 6px;
+      }
+
+      @media (max-width: 1180px) {
+        .history-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
 
       .history-previews {
@@ -1886,7 +2056,7 @@ function App() {
         left: 0;
         top: 0;
         bottom: 0;
-        width: 220px;
+        width: 190px;
         border-right: 1px solid rgba(255, 255, 255, 0.1);
         display: flex;
         flex-direction: column;
@@ -1895,8 +2065,11 @@ function App() {
         padding-top: 1rem;
         padding-left: 0.55rem;
         padding-right: 0.55rem;
-        background: rgba(0, 0, 0, 0.62);
+        background: linear-gradient(180deg, rgba(20, 20, 25, 0.8) 0%, rgba(0, 0, 0, 0.62) 100%);
+        backdrop-filter: blur(10px);
         z-index: 40;
+        transition: width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), padding 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s ease;
+        box-shadow: 2px 0 12px rgba(0, 0, 0, 0.4);
       }
 
       .app-side-item {
@@ -1915,22 +2088,53 @@ function App() {
         border: 1px solid transparent;
         border-radius: 10px;
         background: rgba(255, 255, 255, 0.04);
-        transition: border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+        transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, width 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), padding 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
         cursor: pointer;
         padding: 0 0.65rem;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .app-side-dot::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+        transition: left 0.4s ease;
+      }
+
+      .app-side-dot:hover::before {
+        left: 100%;
       }
 
       .app-side-label {
         font-size: 0.78rem;
         font-weight: 600;
         color: rgba(255, 255, 255, 0.86);
+        position: relative;
+        z-index: 1;
+        transition: opacity 0.25s ease, width 0.25s ease;
       }
 
       .app-side-dot:hover,
       .app-side-item:focus-within .app-side-dot {
         color: rgba(255, 255, 255, 0.95);
-        border-color: rgba(255, 107, 0, 0.4);
-        background: rgba(255, 107, 0, 0.12);
+        border-color: rgba(255, 107, 0, 0.6);
+        background: linear-gradient(135deg, rgba(255, 107, 0, 0.12), rgba(255, 107, 0, 0.06));
+        transform: translateX(4px);
+        box-shadow: 0 0 20px rgba(255, 107, 0, 0.3), inset 0 1px 2px rgba(255, 255, 255, 0.1), 0 4px 12px rgba(255, 107, 0, 0.15);
+      }
+
+      .app-shell.sidebar-collapsed .app-side-dot:hover,
+      .app-shell.sidebar-collapsed .app-side-item:focus-within .app-side-dot {
+        transform: scale(1.05);
+      }
+
+      .app-side-dot:active {
+        transform: translateX(2px) scale(0.98);
       }
 
       .app-side-pop {
@@ -1939,14 +2143,15 @@ function App() {
         top: -2px;
         width: 240px;
         border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        background: rgba(30, 31, 38, 0.96);
-        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+        border: 1px solid rgba(255, 107, 0, 0.15);
+        background: rgba(30, 31, 38, 0.98);
+        backdrop-filter: blur(8px);
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 20px rgba(255, 107, 0, 0.1);
         padding: 0.85rem;
         opacity: 0;
         visibility: hidden;
-        transform: translateY(6px);
-        transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+        transform: translateY(6px) scale(0.95);
+        transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0.22s ease, box-shadow 0.22s ease;
         pointer-events: none;
       }
 
@@ -1954,7 +2159,8 @@ function App() {
       .app-side-item:focus-within .app-side-pop {
         opacity: 1;
         visibility: visible;
-        transform: translateY(0);
+        transform: translateY(0) scale(1);
+        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.6), 0 0 30px rgba(255, 107, 0, 0.15);
       }
 
       .app-side-pop h5 {
@@ -2006,19 +2212,34 @@ function App() {
         background: transparent;
         color: rgba(255, 255, 255, 0.76);
         font-size: 0.8rem;
-        padding: 0;
+        padding: 0.4rem 0.6rem;
         cursor: pointer;
+        border-radius: 6px;
+        transition: all 0.2s ease;
+        position: relative;
+      }
+
+      .app-side-pop .see-all:hover {
+        color: rgba(255, 107, 0, 0.9);
+        background: rgba(255, 107, 0, 0.08);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(255, 107, 0, 0.15);
+      }
+
+      .app-side-pop .see-all:active {
+        transform: translateY(0);
       }
 
       .app-top {
         height: 64px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-        margin-left: 220px;
+        margin-left: 190px;
         display: flex;
         align-items: center;
         justify-content: flex-end;
         padding: 0 18px;
         gap: 0.65rem;
+        transition: margin-left 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
       }
 
       .app-top a,
@@ -2033,7 +2254,7 @@ function App() {
         width: 40px;
         height: 40px;
         border-radius: 50%;
-        border: 1px solid rgba(255, 107, 0, 0.38);
+        border: 1.5px solid rgba(255, 107, 0, 0.38);
         padding: 0;
         display: inline-flex;
         align-items: center;
@@ -2041,14 +2262,38 @@ function App() {
         background: rgba(255, 107, 0, 0.08);
         color: rgba(255, 255, 255, 0.92);
         cursor: pointer;
-        transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+        transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
         position: relative;
+        overflow: hidden;
+      }
+
+      .app-user-pill::after {
+        content: '';
+        position: absolute;
+        width: 0;
+        height: 0;
+        background: rgba(255, 107, 0, 0.2);
+        border-radius: 50%;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        transition: width 0.4s ease, height 0.4s ease;
       }
 
       .app-user-pill:hover {
-        transform: translateY(-1px) scale(1.03);
-        background: rgba(255, 107, 0, 0.14);
-        border-color: rgba(255, 107, 0, 0.58);
+        transform: translateY(-3px) scale(1.08);
+        background: rgba(255, 107, 0, 0.16);
+        border-color: rgba(255, 107, 0, 0.7);
+        box-shadow: 0 8px 24px rgba(255, 107, 0, 0.35), 0 0 0 1px rgba(255, 107, 0, 0.1);
+      }
+
+      .app-user-pill:hover::after {
+        width: 60px;
+        height: 60px;
+      }
+
+      .app-user-pill:active {
+        transform: translateY(-1px) scale(0.95);
       }
 
       .account-dropdown-wrap {
@@ -2078,7 +2323,7 @@ function App() {
         justify-content: space-between;
         gap: 0.5rem;
         padding: 0.7rem 0.8rem;
-        border: none;
+        border: 1px solid transparent;
         border-radius: 10px;
         background: transparent;
         color: rgba(255, 255, 255, 0.9);
@@ -2086,25 +2331,43 @@ function App() {
         font-size: 0.86rem;
         cursor: pointer;
         text-align: left;
+        transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+        position: relative;
       }
 
       .account-dropdown button:hover,
       .account-dropdown a:hover {
-        background: rgba(255, 107, 0, 0.12);
+        background: rgba(255, 107, 0, 0.15);
+        border-color: rgba(255, 107, 0, 0.3);
+        transform: translateX(4px);
+        box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.08);
+        color: rgba(255, 255, 255, 0.98);
+      }
+
+      .account-dropdown button:active,
+      .account-dropdown a:active {
+        transform: translateX(2px) scale(0.98);
       }
 
       .account-dropdown .danger {
         color: #ffb18a;
       }
 
+      .account-dropdown .danger:hover {
+        background: rgba(255, 107, 0, 0.2);
+        border-color: rgba(255, 107, 0, 0.4);
+        box-shadow: inset 0 1px 2px rgba(255, 107, 0, 0.15), 0 0 12px rgba(255, 107, 0, 0.15);
+      }
+
       .app-main {
-        margin-left: 220px;
+        margin-left: 190px;
         min-height: calc(100vh - 64px);
         display: flex;
         align-items: center;
         justify-content: center;
         padding: 1.8rem;
         position: relative;
+        transition: margin-left 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
       }
 
       .app-orb-wrap {
@@ -2122,21 +2385,25 @@ function App() {
       }
 
       .app-shell.sidebar-collapsed .app-sidebar {
-        width: 60px;
+        width: 50px;
         padding-left: 0.35rem;
         padding-right: 0.35rem;
         align-items: center;
+        background: linear-gradient(180deg, rgba(20, 20, 25, 0.85) 0%, rgba(0, 0, 0, 0.7) 100%);
+        box-shadow: 2px 0 16px rgba(0, 0, 0, 0.5);
       }
 
       .app-shell.sidebar-collapsed .app-top {
-        margin-left: 60px;
+        margin-left: 50px;
       }
 
       .app-shell.sidebar-collapsed .app-main {
-        margin-left: 60px;
+        margin-left: 50px;
       }
 
       .app-shell.sidebar-collapsed .app-side-pop {
+        opacity: 0;
+        visibility: hidden;
         display: none;
       }
 
@@ -2147,6 +2414,9 @@ function App() {
       }
 
       .app-shell.sidebar-collapsed .app-side-label {
+        opacity: 0;
+        width: 0;
+        overflow: hidden;
         display: none;
       }
 
@@ -2241,6 +2511,8 @@ function App() {
         background: rgba(255, 255, 255, 0.03);
         padding: 0.2rem;
         margin-bottom: 0.9rem;
+        margin-left: auto;
+        margin-right: auto;
       }
 
       .history-tab {
@@ -2430,9 +2702,9 @@ function App() {
       .latest-preview {
         margin-top: 1rem;
         border: 1px solid rgba(255, 255, 255, 0.11);
-        border-radius: 12px;
-        background: rgba(10, 10, 10, 0.78);
-        padding: 0.8rem;
+        border-radius: 14px;
+        background: linear-gradient(180deg, rgba(12, 12, 14, 0.9), rgba(8, 8, 10, 0.92));
+        padding: 0.95rem;
         text-align: left;
       }
 
@@ -2445,6 +2717,47 @@ function App() {
         margin: 0.45rem 0 0;
         color: rgba(255, 255, 255, 0.6);
         font-size: 0.8rem;
+      }
+
+      .latest-preview-grid {
+        margin-top: 0.9rem;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.65rem;
+      }
+
+      .latest-preview-card {
+        position: relative;
+        aspect-ratio: 4 / 3;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.03);
+        box-shadow: 0 6px 14px rgba(0, 0, 0, 0.26);
+        cursor: zoom-in;
+        transition: transform 0.22s ease, box-shadow 0.22s ease;
+      }
+
+      .latest-preview-card img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        transition: transform 0.22s ease;
+      }
+
+      .latest-preview-card .history-front-shadow {
+        padding: 0.45rem;
+        gap: 0.2rem;
+      }
+
+      .latest-preview-card .history-shadow-title {
+        font-size: 0.74rem;
+      }
+
+      .latest-preview-card .history-shadow-meta {
+        font-size: 0.66rem;
+        line-height: 1.2;
       }
 
       .preview-strip {
@@ -3112,6 +3425,18 @@ function App() {
           height: min(90vw, 520px);
           opacity: 0.42;
         }
+
+        .history-page {
+          padding: 1rem 0.8rem 1.4rem;
+        }
+
+        .history-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .history-quick-facts {
+          grid-template-columns: 1fr 1fr;
+        }
       }
     `,
     []
@@ -3198,15 +3523,7 @@ function App() {
 
               {accountMenuOpen && (
                 <div className="account-dropdown" role="menu" aria-label="Account options">
-                  <a href="#app" role="menuitem" onClick={() => setAccountMenuOpen(false)}>
-                    <span>Profile</span>
-                    <span>›</span>
-                  </a>
-                  <a href="#about" role="menuitem" onClick={() => setAccountMenuOpen(false)}>
-                    <span>Settings</span>
-                    <span>›</span>
-                  </a>
-                  <button type="button" className="danger" onClick={signOut} role="menuitem">
+                  <button type="button" className="danger" onClick={() => { setAccountMenuOpen(false); signOut(); }} role="menuitem">
                     <span>Sign out</span>
                     <span>↗</span>
                   </button>
@@ -3418,11 +3735,28 @@ function App() {
                       <p>No latest scan yet for this page.</p>
                     ) : (
                       <div className="preview-strip latest-mode-strip">
-                        {latestScansForCurrentMode.map((entry) => (
-                          <div className="preview-item" key={entry.id}>
-                            <img src={entry.detections[0]?.preview} alt={entry.detections[0]?.name || 'Latest scan'} />
-                          </div>
-                        ))}
+                        {latestScansForCurrentMode.map((entry, index) => {
+                          const image = entry.detections[0];
+                          if (!image?.preview) return null;
+                          const verdict = image.verdict || (image.aiShare >= 50 ? 'Highly Likely AI/Manipulated' : 'Likely Real');
+
+                          return (
+                            <article
+                              className={`preview-item latest-preview-card ${zoomedPreviewKey === `latest-${entry.id}` ? 'is-zoomed' : ''}`}
+                              key={entry.id}
+                              onClick={() => setZoomedPreviewKey((value) => (value === `latest-${entry.id}` ? null : `latest-${entry.id}`))}
+                              role="button"
+                              tabIndex={0}
+                              aria-label="Zoom latest preview"
+                            >
+                              <img src={image.preview} alt={image.name || 'Latest scan'} />
+                              <div className="history-front-shadow" aria-hidden="true">
+                                <span className="history-shadow-title">{verdict}</span>
+                                <span className="history-shadow-meta">#{index + 1} • AI {image.aiShare}% • Conf {image.confidence}%</span>
+                              </div>
+                            </article>
+                          );
+                        })}
                       </div>
                     )}
                     {historyError && (
@@ -3493,63 +3827,79 @@ function App() {
               </div>
             ) : (
               <div className="history-grid">
-                {filteredHistory.map((entry) => (
-                  <article className="history-card" key={entry.id}>
-                    <div className="history-card-head">
-                      <div>
-                        <h3>{entry.mode === 'single' ? 'Single Image Scan' : 'Batch Scan'}</h3>
-                        <p>{entry.scannedAt}</p>
+                {filteredHistory.map((entry) => {
+                  const leadImage = entry.detections[0];
+                  const verdict = leadImage?.verdict || ((leadImage?.aiShare || 0) >= 50 ? 'Highly Likely AI/Manipulated' : 'Likely Real');
+                  const isLikelyReal = /likely real/i.test(verdict);
+
+                  return (
+                    <article className="history-card" key={entry.id}>
+                      <div className="history-card-head">
+                        <div>
+                          <h3>{entry.mode === 'single' ? 'Single Image Scan' : 'Batch Image Scan'}</h3>
+                          <p>{entry.scannedAt}</p>
+                        </div>
+                        <span className="history-badge">{entry.detections.length} image(s)</span>
                       </div>
-                      <span className="history-badge">{entry.detections.length} image(s)</span>
-                    </div>
 
-                    <div style={{ marginBottom: '0.75rem', color: 'rgba(255,255,255,0.64)', fontSize: '0.8rem' }}>
-                      {entry.mode === 'batch' ? 'Sorted from highest AI percent to lowest AI percent.' : 'Single image result.'}
-                    </div>
-
-                    <div className="history-detection-grid">
-                      {entry.detections.map((image, index) => (
-                        <article className="scan-card detection-card" key={image.preview}>
-                          <DetectionThumb image={image} />
-                          <h4><ScanSearch size={14} /> {image.name}</h4>
-                          <div className="detection-meta">Rank #{index + 1} • AI {image.aiShare}% • Confidence {image.confidence}%</div>
-                          <div className="detection-meta">Vision {Number(image.modelAiShare || 0).toFixed(2)}% • Forensic {Number(image.forensicAiShare || 0).toFixed(2)}% • Metadata {Number(image.heuristicAiShare || 0).toFixed(2)}%</div>
-                          {Array.isArray(image.ensembleModels) && image.ensembleModels.length > 0 && (
-                            <div className="model-chip-row">
-                              {image.ensembleModels.map((model) => (
-                                <span key={model.id} className="model-chip">
-                                  {model.label}: {Number(model.aiLikelihood || 0).toFixed(2)}%
-                                </span>
-                              ))}
-                            </div>
+                      <div className="history-spotlight">
+                        <div
+                          className={`history-preview-shell ${zoomedPreviewKey === `history-${entry.id}` ? 'is-zoomed' : ''}`}
+                          onClick={() => setZoomedPreviewKey((value) => (value === `history-${entry.id}` ? null : `history-${entry.id}`))}
+                          role="button"
+                          tabIndex={0}
+                          aria-label="Zoom history preview"
+                        >
+                          {leadImage?.preview ? (
+                            <img src={leadImage.preview} alt={leadImage.name || 'History scan preview'} />
+                          ) : (
+                            <div className="history-preview-empty">Image placeholder</div>
                           )}
-                          <div className="detection-verdict">
-                            Verdict: {image.verdict || (image.aiShare >= 50 ? 'Highly Likely AI/Manipulated' : 'Likely Real')}
-                          </div>
-                          <ForensicMiniCharts image={image} />
-                          {formatForensicMetrics(image) && (
-                            <div className="detection-metrics">{formatForensicMetrics(image)}</div>
-                          )}
+                        </div>
+                      </div>
 
-                          <div className="graph-metrics">
-                            <div className="graph-metric">
-                              <span className="graph-metric-label">Confidence</span>
-                              <div className="graph-bar"><span style={{ width: `${image.confidence}%` }}></span></div>
-                            </div>
-                            <div className="graph-metric">
-                              <span className="graph-metric-label">AI likelihood</span>
-                              <div className="graph-bar"><span style={{ width: `${image.aiShare}%` }}></span></div>
-                            </div>
-                            <div className="graph-metric">
-                              <span className="graph-metric-label">Artifacts</span>
-                              <div className="graph-bar"><span style={{ width: `${image.artifacts}%` }}></span></div>
-                            </div>
+                      <div className="history-card-body">
+                        <div className={`history-verdict ${isLikelyReal ? 'real' : 'alert'}`}>
+                          {isLikelyReal ? <CheckCircle size={14} /> : <AlertTriangle size={14} />}
+                          <span>{verdict}</span>
+                        </div>
+
+                        <div className="history-quick-facts">
+                          <div className="history-fact">
+                            <strong>Rank #1 • AI {Number(leadImage?.aiShare || 0)}%</strong>
+                            <span></span>
                           </div>
-                        </article>
-                      ))}
-                    </div>
-                  </article>
-                ))}
+                          <div className="history-fact">
+                            <strong>Confidence {Number(leadImage?.confidence || 0)}%</strong>
+                            <span></span>
+                          </div>
+                          <div className="history-fact">
+                            <strong>Vision {Number(leadImage?.modelAiShare || 0).toFixed(2)}% • Forensic {Number(leadImage?.forensicAiShare || 0).toFixed(2)}% • Metadata {Number(leadImage?.heuristicAiShare || 0).toFixed(2)}%</strong>
+                            <span></span>
+                          </div>
+                        </div>
+
+                        <div className="history-progress">
+                          <div className="history-progress-row">
+                            <span>Confidence</span>
+                            <div className="graph-bar"><span style={{ width: `${Number(leadImage?.confidence || 0)}%` }}></span></div>
+                            <strong>{Number(leadImage?.confidence || 0)}%</strong>
+                          </div>
+                          <div className="history-progress-row">
+                            <span>AI</span>
+                            <div className="graph-bar"><span style={{ width: `${Number(leadImage?.aiShare || 0)}%` }}></span></div>
+                            <strong>{Number(leadImage?.aiShare || 0)}%</strong>
+                          </div>
+                          <div className="history-progress-row">
+                            <span>Artifacts</span>
+                            <div className="graph-bar"><span style={{ width: `${Number(leadImage?.artifacts || 0)}%` }}></span></div>
+                            <strong>{Number(leadImage?.artifacts || 0)}%</strong>
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             )}
           </div>

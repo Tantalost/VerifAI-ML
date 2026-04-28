@@ -241,13 +241,23 @@ def calculate_credibility(detections: list) -> dict:
         "unknown_confidence_sum": round(unknown_conf, 4),
     }
 
+
+def load_image_from_bytes(image_bytes: bytes) -> tuple[Image.Image, np.ndarray]:
+    image_array = np.frombuffer(image_bytes, dtype=np.uint8)
+    bgr = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise HTTPException(status_code=400, detail="Unable to decode the uploaded image.")
+
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    return Image.fromarray(rgb), bgr
+
 async def analyze_uploaded_file(file: UploadFile) -> dict:
     content_type = file.content_type or ""
     if not content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail=f"Invalid file type for {file.filename}.")
 
     image_bytes = await file.read()
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    image, _ = load_image_from_bytes(image_bytes)
     filename_l = (file.filename or "").lower()
     metadata_ai_flag = any(token in filename_l for token in ("ai", "generated", "midjourney", "dalle", "sdxl"))
 
