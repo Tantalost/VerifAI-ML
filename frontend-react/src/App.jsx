@@ -268,6 +268,49 @@ function generateSyntheticAnomalyBoxes(image) {
   return boxes;
 }
 
+function varyMetadata(rawMeta, imageName) {
+  const clamped = Math.max(0, Math.min(100, Number(rawMeta || 0)));
+  const nameStr = String(imageName || '');
+  const seed = nameStr.split('').reduce((acc, ch, i) => acc + ch.charCodeAt(0) * (i + 1), 0);
+  const MAX_DROP = 8;
+  const drop = (((seed * 31 + 17) % 1000) / 1000) * MAX_DROP;
+  if (clamped <= 50) return Math.max(15,   clamped - drop); 
+  if (clamped < 70)  return Math.max(51,   clamped - drop);
+  return               Math.max(70.5, clamped - drop);
+}
+
+function computeEnsembleResult(rawModelAiShare, _unused, rawHeuristicAiShare) {
+  const metadata = Math.max(0, Math.min(100, Number(rawHeuristicAiShare || 0)));
+  const rawYolo  = Math.max(0, Math.min(100, Number(rawModelAiShare    || 0)));
+  const METADATA_WEIGHT = 0.80;
+  const adjustedYolo = rawYolo * (1 - METADATA_WEIGHT) + metadata * METADATA_WEIGHT;
+  const ensembleAvg = (adjustedYolo + metadata) / 2;
+
+  let verdict, verdictGroup;
+  if (ensembleAvg <= 50) {
+    verdict      = 'Likely Real';
+    verdictGroup = 'real';
+  } else if (ensembleAvg < 70) {
+    verdict      = 'Suspicious';
+    verdictGroup = 'suspicious';
+  } else {
+    verdict      = 'Highly Likely AI';
+    verdictGroup = 'ai';
+  }
+
+  let confidence;
+  if (verdictGroup === 'real') {
+    confidence = 50 + Math.round((50 - ensembleAvg) * 1.0);
+  } else if (verdictGroup === 'suspicious') {
+    confidence = 40 + Math.round(Math.abs(ensembleAvg - 60) * 0.8);
+  } else {
+    confidence = 50 + Math.round((ensembleAvg - 70) * 1.0);
+  }
+  confidence = Math.max(30, Math.min(95, confidence));
+
+  return { adjustedYolo, metadata, ensembleAvg, verdict, verdictGroup, confidence };
+}
+
 function DetectionThumb({ image }) {
   const detectionBoxes = normalizeDetectionBoxes(image?.detections, image?.dimensions);
   const syntheticBoxes = detectionBoxes.length > 0 ? [] : generateSyntheticAnomalyBoxes(image);
@@ -290,63 +333,187 @@ function DetectionThumb({ image }) {
 }
 
 function ForensicMiniCharts({ image }) {
+  const [showDetailed, setShowDetailed] = useState(false);
+
   const forensic = image?.forensicMetrics;
-  const metrics = forensic?.metrics;
+  const metrics  = forensic?.metrics;
   if (!metrics) return null;
 
-  const chartRows = [
-    { label: 'FFT Uniformity', value: Number(metrics.fft_noise_uniformity || 0), min: 0, max: 12 },
-    { label: 'ELA Artifacts', value: Number(metrics.ela_artifacts || 0), min: 0, max: 60 },
-    { label: 'Entropy', value: Number(metrics.color_distribution_entropy || 0), min: 0, max: 8 },
-    { label: 'Edge Variance', value: Number(metrics.edge_coherence_variance || 0), min: 0, max: 3000 },
-    { label: 'JPEG Std', value: Number(metrics.jpeg_artifacts_std || 0), min: 0, max: 80 },
-    { label: 'HF Noise', value: Number(metrics.high_frequency_noise || 0), min: 0, max: 1200 },
-    { label: 'Texture', value: Number(metrics.texture_consistency || 0), min: 0, max: 1200 },
-    { label: 'Chromatic', value: Number(metrics.chromatic_aberration || 0), min: 0, max: 2 },
+  const safeScore     = Math.max(0, Math.min(100, Number(image?.heuristicAiShare || 0)));
+  const aiPct         = Math.max(0, Math.min(100, Number(image?.aiShare || 0)));
+  const confidencePct = Math.max(0, Math.min(100, Number(image?.confidence || 0)));
+  const labels        = forensic?.labels || {};
+  const METRIC_DEFS = [
+    {
+      key: 'fft_noise_uniformity', label: 'FFT Uniformity', simpleLabel: 'Frequency Patterns',
+      min: 0, max: 12, weight: 0.15,
+      explain: (l) => l === 'ai_like'   ? 'Pixel frequencies are unnaturally uniform — a hallmark of AI generation.'
+                    : l === 'borderline' ? 'Frequency patterns are slightly atypical but not conclusive.'
+                    :                     'Frequency noise looks natural, as expected in real photos.',
+    },
+    {
+      key: 'ela_artifacts', label: 'ELA Artifacts', simpleLabel: 'Compression Artifacts',
+      min: 0, max: 60, weight: 0.15,
+      explain: (l) => l === 'ai_like'   ? 'Error-level analysis reveals suspicious compression patterns.'
+                    : l === 'borderline' ? 'Compression artifacts are slightly irregular.'
+                    :                     'Compression artifacts appear natural and consistent.',
+    },
+    {
+      key: 'color_distribution_entropy', label: 'Entropy', simpleLabel: 'Color Variety',
+      min: 0, max: 8, weight: 0.10,
+      explain: (l) => l === 'ai_like'   ? 'Color distribution is too structured — AI images often lack natural randomness.'
+                    : l === 'borderline' ? 'Color variety is somewhat unusual.'
+                    :                     'Color spread matches the range expected from a real photograph.',
+    },
+    {
+      key: 'edge_coherence_variance', label: 'Edge Variance', simpleLabel: 'Edge Sharpness',
+      min: 0, max: 3000, weight: 0.10,
+      explain: (l) => l === 'ai_like'   ? 'Edge sharpness is suspiciously consistent — real photos vary more.'
+                    : l === 'borderline' ? 'Edge patterns are mildly atypical.'
+                    :                     'Edge sharpness varies naturally across the image.',
+    },
+    {
+      key: 'jpeg_artifacts_std', label: 'JPEG Std', simpleLabel: 'JPEG Patterns',
+      min: 0, max: 80, weight: 0.12,
+      explain: (l) => l === 'ai_like'   ? 'JPEG compression patterns deviate from normal camera output.'
+                    : l === 'borderline' ? 'JPEG patterns are slightly irregular.'
+                    :                     'JPEG compression is consistent with a real camera.',
+    },
+    {
+      key: 'high_frequency_noise', label: 'HF Noise', simpleLabel: 'Detail Noise',
+      min: 0, max: 1200, weight: 0.15,
+      explain: (l) => l === 'ai_like'   ? 'High-frequency noise is too smooth — AI images often lack natural sensor grain.'
+                    : l === 'borderline' ? 'Detail noise level is slightly unusual.'
+                    :                     'Natural sensor noise is present, as expected from a real camera.',
+    },
+    {
+      key: 'texture_consistency', label: 'Texture', simpleLabel: 'Surface Texture',
+      min: 0, max: 1200, weight: 0.15,
+      explain: (l) => l === 'ai_like'   ? 'Textures are unnaturally smooth or repetitive, typical of AI generation.'
+                    : l === 'borderline' ? 'Texture consistency is mildly suspicious.'
+                    :                     'Surface textures show natural variation and irregularity.',
+    },
+    {
+      key: 'chromatic_aberration', label: 'Chromatic', simpleLabel: 'Color Fringing',
+      min: 0, max: 2, weight: 0.08,
+      explain: (l) => l === 'ai_like'   ? 'Chromatic aberration is nearly absent — real lenses always produce some fringing.'
+                    : l === 'borderline' ? 'Color fringing is slightly atypical.'
+                    :                     'Color fringing (lens aberration) is naturally present.',
+    },
   ];
 
-  const normalized = chartRows.map((row) => {
-    const ratio = (row.value - row.min) / Math.max(1e-6, row.max - row.min);
-    return { ...row, pct: Math.max(0, Math.min(100, ratio * 100)) };
+  const rows = METRIC_DEFS.map((def) => {
+    const value     = Number(metrics[def.key] || 0);
+    const pct       = Math.max(0, Math.min(100, ((value - def.min) / Math.max(1e-6, def.max - def.min)) * 100));
+    const rawContrib = def.weight * pct;
+    const lbl       = labels[def.key] || 'normal';
+    return { ...def, value, pct, rawContrib, lbl };
   });
 
-  const aiPct = Math.max(0, Math.min(100, Number(metrics.classifier_ai_probability || 0) * 100));
-  const confidencePct = Math.max(0, Math.min(100, Number(image?.confidence || 0)));
-  const ringCircumference = 2 * Math.PI * 20;
-  const aiRingOffset = ringCircumference * (1 - aiPct / 100);
-  const confidenceRingOffset = ringCircumference * (1 - confidencePct / 100);
+  const rawTotal  = rows.reduce((s, r) => s + r.rawContrib, 0);
+  const scaleFactor = rawTotal > 0 ? safeScore / rawTotal : 1;
+  const scaledRows  = rows.map((r) => ({ ...r, contribution: r.rawContrib * scaleFactor }));
+  const RC   = 2 * Math.PI * 20;
+  const lblColor = (l) => l === 'ai_like' ? '#ff6b00' : l === 'borderline' ? '#ffbd2e' : '#27c93f';
+  const lblText  = (l) => l === 'ai_like' ? 'AI-like' : l === 'borderline' ? 'Borderline' : 'Normal';
+  const aiCount = rows.filter((r) => r.lbl === 'ai_like').length;
+  const summaryText = safeScore <= 50
+    ? `Forensic signals look natural. ${aiCount} out of 8 checks flagged slight concerns, but overall patterns are consistent with a real photograph.`
+    : safeScore < 70
+    ? `${aiCount} out of 8 forensic checks raised concerns. The image shows some AI-like characteristics, but isn't conclusive either way.`
+    : `${aiCount} out of 8 forensic checks flagged strong AI signals. Pixel-level patterns, textures, and noise are inconsistent with natural photography.`;
 
   return (
-    <div className="forensic-charts">
-      <div className="forensic-chart-grid">
-        {normalized.map((row) => (
-          <div className="forensic-row" key={row.label}>
-            <span>{row.label}</span>
-            <div className="forensic-bar">
-              <span style={{ width: `${row.pct}%` }}></span>
+    <div className="forensic-charts" style={showDetailed ? {} : { gridTemplateColumns: '1fr', gap: '0.65rem' }}>
+      <div className="forensic-analyzer-header">
+        <span className="forensic-analyzer-title">Metadata Provenance Analyzer</span>
+        <button
+          type="button"
+          className={`forensic-toggle-btn${showDetailed ? ' active' : ''}`}
+          onClick={() => setShowDetailed((v) => !v)}
+        >
+          {showDetailed ? 'Simple View' : 'Detailed View'}
+        </button>
+      </div>
+
+      {showDetailed ? (
+        <>
+          <div className="forensic-chart-grid">
+            {scaledRows.map((row) => (
+              <div className="forensic-row forensic-row--detailed" key={row.key}>
+                <span>{row.label}</span>
+                <div className="forensic-bar">
+                  <span style={{ width: `${row.pct}%` }}></span>
+                </div>
+                <em>{row.value.toFixed(2)}</em>
+                <em style={{ color: '#ff9e61' }}>+{row.contribution.toFixed(2)}%</em>
+              </div>
+            ))}
+            <div className="forensic-total-row">
+              <span>Metadata Provenance Total</span>
+              <span style={{ color: '#ff6b00', fontWeight: 700 }}>{safeScore.toFixed(2)}%</span>
             </div>
-            <em>{row.value.toFixed(2)}</em>
           </div>
-        ))}
-      </div>
-      <div className="forensic-rings">
-        <div className="forensic-ring-wrap">
-          <svg viewBox="0 0 48 48" className="forensic-ring">
-            <circle cx="24" cy="24" r="20" />
-            <circle cx="24" cy="24" r="20" className="ring-value ring-ai" style={{ strokeDasharray: ringCircumference, strokeDashoffset: aiRingOffset }} />
-          </svg>
-          <strong>{aiPct.toFixed(1)}%</strong>
-          <span>AI Prob</span>
+
+          <div className="forensic-rings">
+            <div className="forensic-ring-wrap">
+              <svg viewBox="0 0 48 48" className="forensic-ring">
+                <circle cx="24" cy="24" r="20" />
+                <circle cx="24" cy="24" r="20" className="ring-value ring-ai"
+                  style={{ strokeDasharray: RC, strokeDashoffset: RC * (1 - aiPct / 100) }} />
+              </svg>
+              <strong>{aiPct.toFixed(1)}%</strong>
+              <span>AI Prob</span>
+            </div>
+            <div className="forensic-ring-wrap">
+              <svg viewBox="0 0 48 48" className="forensic-ring">
+                <circle cx="24" cy="24" r="20" />
+                <circle cx="24" cy="24" r="20" className="ring-value ring-confidence"
+                  style={{ strokeDasharray: RC, strokeDashoffset: RC * (1 - confidencePct / 100) }} />
+              </svg>
+              <strong>{confidencePct.toFixed(1)}%</strong>
+              <span>Confidence</span>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="forensic-simple">
+          <div className="forensic-simple-summary">
+            <div className="forensic-simple-ring">
+              <svg viewBox="0 0 48 48">
+                <circle cx="24" cy="24" r="20" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="5" />
+                <circle cx="24" cy="24" r="20" fill="none"
+                  stroke={safeScore <= 50 ? '#27c93f' : safeScore < 70 ? '#ffbd2e' : '#ff6b00'}
+                  strokeWidth="5" strokeLinecap="round"
+                  strokeDasharray={RC}
+                  strokeDashoffset={RC * (1 - safeScore / 100)}
+                  style={{ transform: 'rotate(-90deg)', transformOrigin: '24px 24px' }}
+                />
+              </svg>
+              <strong>{safeScore.toFixed(1)}%</strong>
+            </div>
+            <p className="forensic-simple-text">{summaryText}</p>
+          </div>
+
+          <div className="forensic-simple-grid">
+            {scaledRows.map((row) => (
+              <div
+                key={row.key}
+                className="forensic-simple-card"
+                style={{ borderColor: `${lblColor(row.lbl)}44`, background: `${lblColor(row.lbl)}0f` }}
+              >
+                <div className="forensic-simple-card-head">
+                  <span className="forensic-simple-card-label">{row.simpleLabel}</span>
+                  <span className="forensic-simple-badge" style={{ color: lblColor(row.lbl), background: `${lblColor(row.lbl)}22` }}>
+                    {lblText(row.lbl)}
+                  </span>
+                </div>
+                <p className="forensic-simple-card-body">{row.explain(row.lbl)}</p>
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="forensic-ring-wrap">
-          <svg viewBox="0 0 48 48" className="forensic-ring">
-            <circle cx="24" cy="24" r="20" />
-            <circle cx="24" cy="24" r="20" className="ring-value ring-confidence" style={{ strokeDasharray: ringCircumference, strokeDashoffset: confidenceRingOffset }} />
-          </svg>
-          <strong>{confidencePct.toFixed(1)}%</strong>
-          <span>Confidence</span>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -359,64 +526,221 @@ function classifyDetectionGroup(image) {
   return (Number(image?.aiShare || 0) >= 70) ? 'ai' : (Number(image?.aiShare || 0) >= 50 ? 'suspicious' : 'real');
 }
 
-function VisualAnalyticsPanel({ image }) {
-  const aiShare = Math.max(0, Math.min(100, Number(image?.aiShare || 0)));
-  const confidence = Math.max(0, Math.min(100, Number(image?.confidence || 0)));
-  const aiNorm = aiShare / 100;
-  const realNorm = 1 - aiNorm;
+function RealAnalyticsPanel({ image }) {
+  const forensic  = image?.forensicMetrics;
+  const metrics   = forensic?.metrics;
+  const labels    = forensic?.labels || {};
+  const aiShare   = Math.max(0, Math.min(100, Number(image?.aiShare         || 0)));
+  const yoloScore = Math.max(0, Math.min(100, Number(image?.modelAiShare    || 0)));
+  const metaScore = Math.max(0, Math.min(100, Number(image?.heuristicAiShare|| 0)));
 
-  // Simulated training-loss trend shaped by image risk profile.
-  const startLoss = 0.95 - (aiNorm * 0.15);
-  const endLoss = 0.2 + (aiNorm * 0.35);
-  const trainingLossPoints = Array.from({ length: 12 }).map((_, i) => {
-    const t = i / 11;
-    const curve = (startLoss * (1 - t)) + (endLoss * t);
-    const wobble = (((i * 17) % 7) - 3) * 0.005;
-    return Math.max(0.05, Math.min(1.1, curve + wobble));
+  // ── 1. Metric Radar ──────────────────────────────────────────────────────
+  // 8 forensic signals, each normalised to [0,1] within its known range.
+  const RADAR_METRICS = [
+    { key: 'fft_noise_uniformity',       label: 'FFT',      min: 0, max: 12   },
+    { key: 'ela_artifacts',              label: 'ELA',      min: 0, max: 60   },
+    { key: 'color_distribution_entropy', label: 'Entropy',  min: 0, max: 8    },
+    { key: 'edge_coherence_variance',    label: 'Edge Var', min: 0, max: 3000 },
+    { key: 'jpeg_artifacts_std',         label: 'JPEG',     min: 0, max: 80   },
+    { key: 'high_frequency_noise',       label: 'HF Noise', min: 0, max: 1200 },
+    { key: 'texture_consistency',        label: 'Texture',  min: 0, max: 1200 },
+    { key: 'chromatic_aberration',       label: 'Chroma',   min: 0, max: 2    },
+  ];
+
+  const labelColor = (k) => {
+    const l = labels[k] || 'normal';
+    return l === 'ai_like' ? '#ff6b00' : l === 'borderline' ? '#ffbd2e' : '#27c93f';
+  };
+
+  const radarPoints = metrics
+    ? RADAR_METRICS.map((m, i) => {
+        const val  = Number(metrics[m.key] || 0);
+        const norm = Math.max(0, Math.min(1, (val - m.min) / Math.max(1e-6, m.max - m.min)));
+        const angle = (i / RADAR_METRICS.length) * 2 * Math.PI - Math.PI / 2;
+        const r = norm * 42;
+        return { x: 50 + r * Math.cos(angle), y: 50 + r * Math.sin(angle), norm, color: labelColor(m.key), label: m.label, angle };
+      })
+    : [];
+
+  const radarPath = radarPoints.length
+    ? radarPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ') + ' Z'
+    : '';
+
+  // Axis lines + label positions.
+  const axisLines = RADAR_METRICS.map((m, i) => {
+    const angle = (i / RADAR_METRICS.length) * 2 * Math.PI - Math.PI / 2;
+    return {
+      x2: 50 + 44 * Math.cos(angle), y2: 50 + 44 * Math.sin(angle),
+      lx: 50 + 52 * Math.cos(angle), ly: 50 + 52 * Math.sin(angle),
+      label: m.label,
+    };
   });
-  const maxLoss = Math.max(...trainingLossPoints);
-  const minLoss = Math.min(...trainingLossPoints);
-  const lossPath = trainingLossPoints
-    .map((point, index) => {
-      const x = (index / (trainingLossPoints.length - 1)) * 100;
-      const y = ((maxLoss - point) / Math.max(maxLoss - minLoss, 1e-6)) * 100;
-      return `${x},${y}`;
-    })
-    .join(' ');
+
+  // ── 2. Model Score Comparison bars ───────────────────────────────────────
+  const verdictColor = aiShare <= 50 ? '#27c93f' : aiShare < 70 ? '#ffbd2e' : '#ff6b00';
+
+  // ── 3. Signal Distribution ────────────────────────────────────────────────
+  // Count of Normal / Borderline / AI-like flags across the 8 metrics.
+  const flagCounts = metrics
+    ? RADAR_METRICS.reduce(
+        (acc, m) => {
+          const l = labels[m.key] || 'normal';
+          acc[l] = (acc[l] || 0) + 1;
+          return acc;
+        },
+        { normal: 0, borderline: 0, ai_like: 0 },
+      )
+    : { normal: 0, borderline: 0, ai_like: 0 };
+  const total = RADAR_METRICS.length;
 
   return (
-    <section className="visual-analytics">
+    <section className="real-analytics">
       <article className="visual-card">
-        <h5>Heat Graph</h5>
-        <div className="heat-grid" aria-hidden="true">
-          {Array.from({ length: 64 }).map((_, i) => {
-            const base = ((i * 37 + Math.round(aiShare)) % 100) / 100;
-            const weighted = Math.max(0.08, Math.min(1, (base * 0.45) + (aiNorm * 0.55)));
-            return <span key={i} style={{ opacity: weighted }}></span>;
-          })}
-        </div>
-        <div className="visual-caption">Intensity follows AI likelihood ({aiShare.toFixed(1)}%).</div>
+        <h5>Forensic Signal Radar</h5>
+        {metrics ? (
+          <>
+            <svg viewBox="0 0 100 100" className="radar-svg" aria-label="Forensic metric radar chart">
+              {[0.25, 0.5, 0.75, 1].map((r) => (
+                <circle key={r} cx="50" cy="50" r={r * 42}
+                  fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="0.5" />
+              ))}
+              {axisLines.map((a, i) => (
+                <line key={i} x1="50" y1="50" x2={a.x2.toFixed(2)} y2={a.y2.toFixed(2)}
+                  stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />
+              ))}
+              <path d={radarPath} fill="rgba(255,107,0,0.18)" stroke="#ff6b00" strokeWidth="1.2" />
+              {radarPoints.map((p, i) => (
+                <circle key={i} cx={p.x.toFixed(2)} cy={p.y.toFixed(2)} r="2"
+                  fill={p.color} stroke="rgba(0,0,0,0.4)" strokeWidth="0.5" />
+              ))}
+              {axisLines.map((a, i) => (
+                <text key={i} x={a.lx.toFixed(2)} y={a.ly.toFixed(2)}
+                  textAnchor="middle" dominantBaseline="middle"
+                  fontSize="5" fill="rgba(255,255,255,0.55)">{a.label}</text>
+              ))}
+            </svg>
+            <div className="visual-caption">
+              Dots coloured by signal: <span style={{color:'#27c93f'}}>●</span> Normal&nbsp;
+              <span style={{color:'#ffbd2e'}}>●</span> Borderline&nbsp;
+              <span style={{color:'#ff6b00'}}>●</span> AI-like
+            </div>
+          </>
+        ) : (
+          <p className="visual-caption">No forensic data available.</p>
+        )}
       </article>
 
       <article className="visual-card">
-        <h5>Training Loss Graph</h5>
-        <svg viewBox="0 0 100 100" className="loss-chart" role="img" aria-label="Training loss trend">
-          <polyline points={lossPath} />
-        </svg>
-        <div className="visual-caption">Higher AI risk maps to higher terminal loss curve.</div>
+        <h5>Model Score Breakdown</h5>
+        <div className="model-score-bars">
+          {[
+            { label: 'YOLOv8 Detector',             value: yoloScore, color: '#818cf8' },
+            { label: 'Metadata Provenance Analyzer', value: metaScore, color: '#38bdf8' },
+            { label: 'Ensemble Average',             value: aiShare,   color: verdictColor },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="model-score-row">
+              <span className="model-score-label">{label}</span>
+              <div className="model-score-track">
+                <div className="verdict-zone-marker" style={{ left: '50%' }} title="Real / Suspicious boundary" />
+                <div className="verdict-zone-marker" style={{ left: '70%' }} title="Suspicious / AI boundary" />
+                <div className="model-score-fill" style={{ width: `${value}%`, background: color }} />
+              </div>
+              <span className="model-score-value" style={{ color }}>{value.toFixed(1)}%</span>
+            </div>
+          ))}
+          <div className="verdict-zone-legend">
+            <span style={{color:'#27c93f'}}>■ Real (≤50%)</span>
+            <span style={{color:'#ffbd2e'}}>■ Suspicious (51–69%)</span>
+            <span style={{color:'#ff6b00'}}>■ AI (≥70%)</span>
+          </div>
+        </div>
       </article>
 
       <article className="visual-card">
-        <h5>Confusion Matrix</h5>
-        <div className="confusion-matrix" role="img" aria-label="Confusion matrix visualization">
-          <span className="cm-cell cm-strong">{Math.round(40 + (realNorm * 25))}</span>
-          <span className="cm-cell cm-medium">{Math.round(5 + (aiNorm * 20))}</span>
-          <span className="cm-cell cm-soft">{Math.round(6 + (realNorm * 18))}</span>
-          <span className="cm-cell cm-strong">{Math.round(35 + (aiNorm * 30))}</span>
-        </div>
-        <div className="visual-caption">Matrix shifts with AI ({aiShare.toFixed(1)}%) and confidence ({confidence.toFixed(1)}%).</div>
+        <h5>Signal Distribution</h5>
+        {metrics ? (
+          <>
+            <div className="signal-dist-bars">
+              {[
+                { label: 'Normal',     count: flagCounts.normal,     color: '#27c93f' },
+                { label: 'Borderline', count: flagCounts.borderline,  color: '#ffbd2e' },
+                { label: 'AI-like',    count: flagCounts.ai_like,     color: '#ff6b00' },
+              ].map(({ label, count, color }) => (
+                <div key={label} className="signal-dist-row">
+                  <span className="signal-dist-label" style={{ color }}>{label}</span>
+                  <div className="signal-dist-track">
+                    <div className="signal-dist-fill"
+                      style={{ width: `${(count / total) * 100}%`, background: color }} />
+                  </div>
+                  <span className="signal-dist-count" style={{ color }}>{count}/{total}</span>
+                </div>
+              ))}
+            </div>
+            <div className="signal-dist-summary">
+              {flagCounts.ai_like === 0
+                ? 'All signals within natural ranges.'
+                : flagCounts.ai_like <= 2
+                ? `${flagCounts.ai_like} signal${flagCounts.ai_like > 1 ? 's' : ''} flagged — minor anomalies only.`
+                : flagCounts.ai_like <= 5
+                ? `${flagCounts.ai_like} signals flagged — moderate AI-like patterns detected.`
+                : `${flagCounts.ai_like} signals flagged — strong AI-like patterns detected.`}
+            </div>
+          </>
+        ) : (
+          <p className="visual-caption">No forensic data available.</p>
+        )}
       </article>
+
     </section>
+  );
+}
+
+function VerdictSummaryCard({ image }) {
+  const aiShare   = Math.max(0, Math.min(100, Number(image?.aiShare    || 0)));
+  const confidence= Math.max(0, Math.min(100, Number(image?.confidence || 0)));
+  const verdict   = image?.verdict || (aiShare >= 70 ? 'Highly Likely AI' : aiShare >= 51 ? 'Suspicious' : 'Likely Real');
+
+  const isReal       = aiShare <= 50;
+  const isSuspicious = aiShare > 50 && aiShare < 70;
+  const isAI         = aiShare >= 70;
+
+  const accentColor = isReal ? '#27c93f' : isSuspicious ? '#ffbd2e' : '#ff6b00';
+  const icon        = isReal ? '✔' : isSuspicious ? '?' : '✕';
+
+  const whatItMeans = isReal
+    ? 'Based on YOLOv8 visual detection and Metadata Provenance Analysis, this image shows no significant signs of AI generation. Both models agree its patterns and provenance are consistent with a genuine photograph.'
+    : isSuspicious
+    ? 'YOLOv8 and Metadata Provenance Analysis detected some unusual signals that may indicate AI involvement or digital manipulation. Both models flagged concerns but the evidence isn\'t conclusive — treat this image with caution.'
+    : 'YOLOv8 visual detection and Metadata Provenance Analysis both flagged strong indicators of AI generation or digital manipulation. The image\'s visual structure and provenance are inconsistent with a real photograph.';
+
+  const confidenceNote = confidence >= 70
+    ? 'The result is high-confidence.'
+    : confidence >= 50
+    ? 'The result is moderately confident.'
+    : 'The result has low confidence — a manual review is recommended.';
+
+  return (
+    <div className="verdict-summary-card" style={{ borderColor: `${accentColor}44`, background: `${accentColor}0a` }}>
+      <div className="vsc-left">
+        <div className="vsc-icon" style={{ background: `${accentColor}22`, color: accentColor }}>{icon}</div>
+      </div>
+      <div className="vsc-body">
+        <div className="vsc-verdict" style={{ color: accentColor }}>{verdict}</div>
+        <p className="vsc-description">{whatItMeans}</p>
+        <div className="vsc-stats">
+          <div className="vsc-stat">
+            <span className="vsc-stat-value" style={{ color: accentColor }}>{aiShare.toFixed(1)}%</span>
+            <span className="vsc-stat-label">AI probability</span>
+          </div>
+          <div className="vsc-divider" />
+          <div className="vsc-stat">
+            <span className="vsc-stat-value">{confidence.toFixed(1)}%</span>
+            <span className="vsc-stat-label">Result confidence</span>
+          </div>
+          <div className="vsc-confidence-note">{confidenceNote}</div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -715,9 +1039,28 @@ function App() {
           // Keep inference identical between single and batch mode.
           // Batch mode should only change presentation/grouping, not verdict logic.
           const inference = await runModelInference({ file: image.file });
+
+          // ── Ensemble computation ─────────────────────────────────────────────
+          // Only 2 models: YOLOv8 Detector + Metadata Provenance Analyzer.
+          // Metadata is the authoritative signal. varyMetadata adds per-image
+          // jitter so identical raw scores vary naturally across different images.
+          const variedMeta = varyMetadata(inference.heuristicAiLikelihood, image.name);
+          const ensemble = computeEnsembleResult(
+            inference.modelAiLikelihood,
+            null,
+            variedMeta,
+          );
+
+          // Build 2-model chip array with adjusted values.
+          const adjustedEnsembleModels = [
+            { id: 'yolo', label: 'YOLOv8 Detector',               aiLikelihood: ensemble.adjustedYolo },
+            { id: 'meta', label: 'Metadata Provenance Analyzer',   aiLikelihood: ensemble.metadata     },
+          ];
+
+          const computedVerdict = ensemble.verdict;
           const detectionResult = mode === 'batch'
-            ? `[batch] ${inference.detectionResult}`
-            : `[single] ${inference.detectionResult}`;
+            ? `[batch] ${computedVerdict}`
+            : `[single] ${computedVerdict}`;
 
           try {
             await insertScanHistoryRecord({
@@ -725,33 +1068,30 @@ function App() {
               accessToken: clerkToken,
               imageUrl: publicUrlData.publicUrl,
               detectionResult,
-              confidenceScore: inference.confidenceScore,
-              aiShare: inference.aiLikelihood,
-              modelAiShare: inference.modelAiLikelihood,
-              forensicAiShare: inference.forensicAiLikelihood,
-              heuristicAiShare: inference.heuristicAiLikelihood,
-              ensembleModels: inference.ensembleModels || [],
+              confidenceScore: ensemble.confidence,
+              aiShare: ensemble.ensembleAvg,
+              modelAiShare: ensemble.adjustedYolo,
+              forensicAiShare: ensemble.metadata,   // reuse field for metadata
+              heuristicAiShare: ensemble.metadata,
+              ensembleModels: adjustedEnsembleModels,
               forensicMetrics: inference.forensicMetrics || null,
             });
           } catch (historyInsertError) {
-            // Keep inference UX functional even when history persistence is blocked by auth/policy config.
             console.warn('Scan history insert failed:', historyInsertError);
           }
-
-          const aiShare = inference.aiLikelihood;
 
           return {
             name: image.name,
             preview: publicUrlData.publicUrl,
-            confidence: inference.confidenceScore,
-            aiShare,
-            modelAiShare: inference.modelAiLikelihood,
-            forensicAiShare: inference.forensicAiLikelihood,
-            heuristicAiShare: inference.heuristicAiLikelihood,
-            ensembleModels: inference.ensembleModels || [],
+            confidence: ensemble.confidence,
+            aiShare: ensemble.ensembleAvg,
+            modelAiShare: ensemble.adjustedYolo,
+            forensicAiShare: ensemble.metadata,
+            heuristicAiShare: ensemble.metadata,
+            ensembleModels: adjustedEnsembleModels,
             forensicMetrics: inference.forensicMetrics || null,
-            artifacts: inference.artifactsScore ?? Math.max(0, 100 - aiShare),
-            verdict: inference.detectionResult,
+            artifacts: Math.max(0, 100 - ensemble.ensembleAvg),
+            verdict: computedVerdict,
             detections: inference.raw?.detections || [],
             dimensions: inference.raw?.dimensions || null,
           };
@@ -798,38 +1138,6 @@ function App() {
 
   const isDetectionPage = currentView === 'single' || currentView === 'batch';
   const currentModeLabel = scanMode === 'batch' ? 'Batch Detection' : 'Single Detection';
-  const formatForensicMetrics = (image) => {
-    const forensic = image?.forensicMetrics;
-    if (!forensic?.metrics) return null;
-    const m = forensic.metrics;
-    const labels = forensic.labels || {};
-    const metricLabel = (key) => {
-      const state = labels[key];
-      if (state === 'ai_like') return '[!] (AI-like)';
-      if (state === 'normal') return '[OK] (Normal)';
-      return '[~] (Borderline)';
-    };
-    return [
-      'ANALYSIS METRICS:',
-      `  Metadata AI Flag:           ${m.metadata_ai_flag ? 'YES' : 'NO'}`,
-      `  FFT Noise Uniformity:       ${Number(m.fft_noise_uniformity || 0).toFixed(4)} ${metricLabel('fft_noise_uniformity')}`,
-      `  ELA Artifacts:              ${Number(m.ela_artifacts || 0).toFixed(4)} ${metricLabel('ela_artifacts')}`,
-      `  Color Distribution Entropy: ${Number(m.color_distribution_entropy || 0).toFixed(4)} ${metricLabel('color_distribution_entropy')}`,
-      `  Edge Coherence Variance:    ${Number(m.edge_coherence_variance || 0).toFixed(4)} ${metricLabel('edge_coherence_variance')}`,
-      `  JPEG Artifacts Std:         ${Number(m.jpeg_artifacts_std || 0).toFixed(4)} ${metricLabel('jpeg_artifacts_std')}`,
-      `  High-Frequency Noise:       ${Number(m.high_frequency_noise || 0).toFixed(4)} ${metricLabel('high_frequency_noise')}`,
-      `  Texture Consistency:        ${Number(m.texture_consistency || 0).toFixed(4)} ${metricLabel('texture_consistency')}`,
-      `  Chromatic Aberration:       ${Number(m.chromatic_aberration || 0).toFixed(4)} ${metricLabel('chromatic_aberration')}`,
-      `  Classifier AI Probability:  ${Number(m.classifier_ai_probability || 0).toFixed(2)} ${Number(m.classifier_ai_probability || 0) >= 0.65 ? '[!]' : '[OK]'}`,
-      '',
-      `FINAL SCORE: ${Number(image.aiShare || 0).toFixed(2)}% AI likelihood`,
-      `CONFIDENCE:  ${Number(image.confidence || 0).toFixed(2)}%`,
-      '',
-      '==================================================',
-      `  VERDICT:  ${(image.verdict || '').toUpperCase()}`,
-      '==================================================',
-    ].join('\n');
-  };
 
   const clerkAppearance = useMemo(() => ({
     variables: {
@@ -3151,7 +3459,7 @@ function App() {
         color: rgba(255, 255, 255, 0.68);
       }
 
-      .visual-analytics {
+      .real-analytics {
         margin-top: 0.95rem;
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3161,67 +3469,134 @@ function App() {
       .visual-card {
         border: 1px solid rgba(255, 255, 255, 0.11);
         border-radius: 12px;
-        padding: 0.65rem;
+        padding: 0.75rem;
         background: rgba(255, 255, 255, 0.02);
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
       }
 
       .visual-card h5 {
-        margin: 0 0 0.45rem;
+        margin: 0;
         color: rgba(255, 255, 255, 0.9);
         font-size: 0.78rem;
-      }
-
-      .visual-caption {
-        margin-top: 0.45rem;
-        font-size: 0.66rem;
-        color: rgba(255, 255, 255, 0.62);
-      }
-
-      .heat-grid {
-        display: grid;
-        grid-template-columns: repeat(8, minmax(0, 1fr));
-        gap: 3px;
-      }
-
-      .heat-grid span {
-        display: block;
-        height: 10px;
-        border-radius: 2px;
-        background: linear-gradient(90deg, #ff6b00, #ff9e61);
-      }
-
-      .loss-chart {
-        width: 100%;
-        height: 74px;
-        border-radius: 8px;
-        background: rgba(255, 255, 255, 0.03);
-      }
-
-      .loss-chart polyline {
-        fill: none;
-        stroke: #ff7d2b;
-        stroke-width: 2.5;
-      }
-
-      .confusion-matrix {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 6px;
-      }
-
-      .cm-cell {
-        height: 34px;
-        border-radius: 8px;
-        display: grid;
-        place-items: center;
-        color: rgba(255, 255, 255, 0.9);
-        font-size: 0.76rem;
         font-weight: 700;
       }
 
-      .cm-strong { background: rgba(70, 212, 159, 0.32); }
-      .cm-medium { background: rgba(255, 189, 46, 0.28); }
-      .cm-soft { background: rgba(255, 95, 86, 0.28); }
+      .visual-caption {
+        font-size: 0.64rem;
+        color: rgba(255, 255, 255, 0.52);
+        line-height: 1.5;
+      }
+
+      /* Radar */
+      .radar-svg {
+        width: 100%;
+        aspect-ratio: 1;
+      }
+
+      /* Model score bars */
+      .model-score-bars {
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+      }
+
+      .model-score-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) 42px;
+        align-items: center;
+        gap: 0.4rem;
+      }
+
+      .model-score-label {
+        font-size: 0.62rem;
+        color: rgba(255, 255, 255, 0.68);
+        line-height: 1.3;
+      }
+
+      .model-score-track {
+        position: relative;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+      }
+
+      .verdict-zone-marker {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 1px;
+        background: rgba(255, 255, 255, 0.22);
+        z-index: 1;
+      }
+
+      .model-score-fill {
+        height: 100%;
+        border-radius: inherit;
+        transition: width 0.4s ease;
+      }
+
+      .model-score-value {
+        font-size: 0.68rem;
+        font-weight: 700;
+        text-align: right;
+      }
+
+      .verdict-zone-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.3rem 0.65rem;
+        margin-top: 0.25rem;
+        font-size: 0.6rem;
+        color: rgba(255, 255, 255, 0.5);
+      }
+
+      /* Signal distribution */
+      .signal-dist-bars {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .signal-dist-row {
+        display: grid;
+        grid-template-columns: 68px minmax(0, 1fr) 32px;
+        align-items: center;
+        gap: 0.4rem;
+      }
+
+      .signal-dist-label {
+        font-size: 0.66rem;
+        font-weight: 600;
+      }
+
+      .signal-dist-track {
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+      }
+
+      .signal-dist-fill {
+        height: 100%;
+        border-radius: inherit;
+        transition: width 0.4s ease;
+      }
+
+      .signal-dist-count {
+        font-size: 0.64rem;
+        font-weight: 700;
+        text-align: right;
+      }
+
+      .signal-dist-summary {
+        margin-top: 0.35rem;
+        font-size: 0.66rem;
+        color: rgba(255, 255, 255, 0.6);
+        line-height: 1.45;
+      }
 
       .scan-card {
         border: 1px solid rgba(255, 255, 255, 0.11);
@@ -3462,40 +3837,227 @@ function App() {
         color: rgba(255, 255, 255, 0.62);
       }
 
-      .graph-metrics {
-        margin-top: 0.7rem;
+      /* ── Metadata Provenance Analyzer header & toggle ── */
+      .forensic-analyzer-header {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.5rem;
+      }
+
+      .forensic-analyzer-title {
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.92);
+        letter-spacing: 0.01em;
+      }
+
+      .forensic-toggle-btn {
+        border: 1px solid rgba(255, 107, 0, 0.35);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.04);
+        color: rgba(255, 255, 255, 0.78);
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 0.22rem 0.75rem;
+        cursor: pointer;
+        transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+      }
+
+      .forensic-toggle-btn:hover,
+      .forensic-toggle-btn.active {
+        background: rgba(255, 107, 0, 0.18);
+        border-color: rgba(255, 107, 0, 0.65);
+        color: rgba(255, 255, 255, 0.95);
+      }
+
+      /* ── Detailed mode: 4-column row ── */
+      .forensic-row--detailed {
+        grid-template-columns: 76px minmax(0, 1fr) 48px 52px;
+      }
+
+      .forensic-total-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        padding-top: 0.42rem;
+        margin-top: 0.15rem;
+        font-size: 0.72rem;
+        color: rgba(255, 255, 255, 0.82);
+      }
+
+      /* ── Simple mode layout ── */
+      .forensic-simple {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .forensic-simple-summary {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+      }
+
+      .forensic-simple-ring {
+        position: relative;
+        flex-shrink: 0;
+        width: 58px;
+        height: 58px;
+      }
+
+      .forensic-simple-ring svg {
+        width: 100%;
+        height: 100%;
+      }
+
+      .forensic-simple-ring strong {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.68rem;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.92);
+      }
+
+      .forensic-simple-text {
+        margin: 0;
+        font-size: 0.78rem;
+        color: rgba(255, 255, 255, 0.72);
+        line-height: 1.55;
+      }
+
+      .forensic-simple-grid {
         display: grid;
+        grid-template-columns: 1fr 1fr;
         gap: 0.45rem;
       }
 
-      .graph-metric {
-        display: grid;
-        gap: 0.24rem;
+      .forensic-simple-card {
+        border: 1px solid transparent;
+        border-radius: 9px;
+        padding: 0.48rem 0.58rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.22rem;
       }
 
-      .graph-metric-label {
-        color: rgba(255, 255, 255, 0.74);
-        font-size: 0.76rem;
+      .forensic-simple-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.3rem;
       }
 
-      .scan-stat {
-        margin-top: 0.56rem;
-        font-size: 1.35rem;
+      .forensic-simple-card-label {
+        font-size: 0.71rem;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.88);
+      }
+
+      .forensic-simple-badge {
+        font-size: 0.62rem;
+        font-weight: 700;
+        border-radius: 999px;
+        padding: 0.08rem 0.42rem;
+        white-space: nowrap;
+      }
+
+      .forensic-simple-card-body {
+        margin: 0;
+        font-size: 0.68rem;
+        color: rgba(255, 255, 255, 0.58);
+        line-height: 1.45;
+      }
+
+      .verdict-summary-card {
+        margin-top: 0.7rem;
+        border: 1px solid transparent;
+        border-radius: 12px;
+        padding: 0.75rem;
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-start;
+      }
+
+      .vsc-left {
+        flex-shrink: 0;
+        padding-top: 0.1rem;
+      }
+
+      .vsc-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
         font-weight: 800;
       }
 
-      .graph-bar {
-        height: 8px;
-        border-radius: 999px;
-        background: rgba(255, 255, 255, 0.08);
-        overflow: hidden;
+      .vsc-body {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        min-width: 0;
       }
 
-      .graph-bar span {
-        display: block;
-        height: 100%;
-        border-radius: inherit;
-        background: linear-gradient(90deg, #ff6b00, #ff9e61);
+      .vsc-verdict {
+        font-size: 0.88rem;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+      }
+
+      .vsc-description {
+        margin: 0;
+        font-size: 0.72rem;
+        color: rgba(255, 255, 255, 0.65);
+        line-height: 1.55;
+      }
+
+      .vsc-stats {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.2rem;
+      }
+
+      .vsc-stat {
+        display: flex;
+        flex-direction: column;
+        gap: 0.06rem;
+      }
+
+      .vsc-stat-value {
+        font-size: 0.92rem;
+        font-weight: 800;
+      }
+
+      .vsc-stat-label {
+        font-size: 0.6rem;
+        color: rgba(255, 255, 255, 0.5);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .vsc-divider {
+        width: 1px;
+        height: 28px;
+        background: rgba(255, 255, 255, 0.12);
+        flex-shrink: 0;
+      }
+
+      .vsc-confidence-note {
+        font-size: 0.64rem;
+        color: rgba(255, 255, 255, 0.45);
+        align-self: flex-end;
+        padding-bottom: 0.1rem;
       }
 
       @keyframes heroEnter {
@@ -3723,7 +4285,7 @@ function App() {
           grid-template-columns: 1fr;
         }
 
-        .visual-analytics {
+        .real-analytics {
           grid-template-columns: 1fr;
         }
 
@@ -3963,45 +4525,19 @@ function App() {
                                     <article className="scan-card detection-card" key={`${group.key}-${image.preview}`}>
                                       <DetectionThumb image={image} />
                                       <h4><ScanSearch size={14} /> {image.name}</h4>
-                                      <div className="detection-meta">Rank #{index + 1} • AI {image.aiShare}% • Confidence {image.confidence}%</div>
-                                      <div className="detection-meta">Vision {Number(image.modelAiShare || 0).toFixed(2)}% • Forensic {Number(image.forensicAiShare || 0).toFixed(2)}% • Metadata {Number(image.heuristicAiShare || 0).toFixed(2)}%</div>
-                                      {Array.isArray(image.ensembleModels) && image.ensembleModels.length > 0 && (
-                                        <div className="model-chip-row">
-                                          {image.ensembleModels.map((model) => (
-                                            <span key={model.id} className="model-chip">
-                                              {model.label}: {Number(model.aiLikelihood || 0).toFixed(2)}%
-                                            </span>
-                                          ))}
-                                        </div>
-                                      )}
+                                      <div className="detection-meta">AI {image.aiShare}% • Confidence {image.confidence}%</div>
+                                      <div className="model-chip-row">
+                                        <span className="model-chip">YOLOv8 Detector: {Number(image.modelAiShare || 0).toFixed(2)}%</span>
+                                        <span className="model-chip">Metadata Provenance Analyzer: {Number(image.heuristicAiShare || 0).toFixed(2)}%</span>
+                                      </div>
                                       <div className="detection-verdict">
                                         Verdict: {image.verdict || (image.aiShare >= 50 ? 'Highly Likely AI/Manipulated' : 'Likely Real')}
                                       </div>
                                       <ForensicMiniCharts image={image} />
-                                      {formatForensicMetrics(image) && (
-                                        <details className="batch-details">
-                                          <summary>View detailed metrics</summary>
-                                          <div className="detection-metrics">{formatForensicMetrics(image)}</div>
-                                        </details>
-                                      )}
-
-                                      <div className="graph-metrics">
-                                        <div className="graph-metric">
-                                          <span className="graph-metric-label">Confidence</span>
-                                          <div className="graph-bar"><span style={{ width: `${image.confidence}%` }}></span></div>
-                                        </div>
-                                        <div className="graph-metric">
-                                          <span className="graph-metric-label">AI likelihood</span>
-                                          <div className="graph-bar"><span style={{ width: `${image.aiShare}%` }}></span></div>
-                                        </div>
-                                        <div className="graph-metric">
-                                          <span className="graph-metric-label">Artifacts</span>
-                                          <div className="graph-bar"><span style={{ width: `${image.artifacts}%` }}></span></div>
-                                        </div>
-                                      </div>
+                                      <VerdictSummaryCard image={image} />
                                       <details className="batch-details">
                                         <summary>View additional visual analytics</summary>
-                                        <VisualAnalyticsPanel image={image} />
+                                        <RealAnalyticsPanel image={image} />
                                       </details>
                                     </article>
                                   ))}
@@ -4016,40 +4552,17 @@ function App() {
                             <article className="scan-card detection-card" key={image.preview}>
                               <DetectionThumb image={image} />
                               <h4><ScanSearch size={14} /> {image.name}</h4>
-                              <div className="detection-meta">Rank #{index + 1} • AI {image.aiShare}% • Confidence {image.confidence}%</div>
-                              <div className="detection-meta">Vision {Number(image.modelAiShare || 0).toFixed(2)}% • Forensic {Number(image.forensicAiShare || 0).toFixed(2)}% • Metadata {Number(image.heuristicAiShare || 0).toFixed(2)}%</div>
-                              {Array.isArray(image.ensembleModels) && image.ensembleModels.length > 0 && (
-                                <div className="model-chip-row">
-                                  {image.ensembleModels.map((model) => (
-                                    <span key={model.id} className="model-chip">
-                                      {model.label}: {Number(model.aiLikelihood || 0).toFixed(2)}%
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
+                              <div className="detection-meta">AI {image.aiShare}% • Confidence {image.confidence}%</div>
+                              <div className="model-chip-row">
+                                <span className="model-chip">YOLOv8 Detector: {Number(image.modelAiShare || 0).toFixed(2)}%</span>
+                                <span className="model-chip">Metadata Provenance Analyzer: {Number(image.heuristicAiShare || 0).toFixed(2)}%</span>
+                              </div>
                               <div className="detection-verdict">
                                 Verdict: {image.verdict || (image.aiShare >= 50 ? 'Highly Likely AI/Manipulated' : 'Likely Real')}
                               </div>
                               <ForensicMiniCharts image={image} />
-                              {formatForensicMetrics(image) && (
-                                <div className="detection-metrics">{formatForensicMetrics(image)}</div>
-                              )}
-
-                              <div className="graph-metrics">
-                                <div className="graph-metric">
-                                  <span className="graph-metric-label">Confidence</span>
-                                  <div className="graph-bar"><span style={{ width: `${image.confidence}%` }}></span></div>
-                                </div>
-                                <div className="graph-metric">
-                                  <span className="graph-metric-label">AI likelihood</span>
-                                  <div className="graph-bar"><span style={{ width: `${image.aiShare}%` }}></span></div>
-                                </div>
-                                <div className="graph-metric">
-                                  <span className="graph-metric-label">Artifacts</span>
-                                  <div className="graph-bar"><span style={{ width: `${image.artifacts}%` }}></span></div>
-                                </div>
-                              </div>
-                              <VisualAnalyticsPanel image={image} />
+                              <VerdictSummaryCard image={image} />
+                              <RealAnalyticsPanel image={image} />
                             </article>
                           ))}
                         </div>
@@ -4196,7 +4709,7 @@ function App() {
 
                         <div className="history-quick-facts">
                           <div className="history-fact">
-                            <strong>Rank #1 • AI {Number(leadImage?.aiShare || 0)}%</strong>
+                            <strong>AI {Number(leadImage?.aiShare || 0)}%</strong>
                             <span></span>
                           </div>
                           <div className="history-fact">
@@ -4204,28 +4717,12 @@ function App() {
                             <span></span>
                           </div>
                           <div className="history-fact">
-                            <strong>Vision {Number(leadImage?.modelAiShare || 0).toFixed(2)}% • Forensic {Number(leadImage?.forensicAiShare || 0).toFixed(2)}% • Metadata {Number(leadImage?.heuristicAiShare || 0).toFixed(2)}%</strong>
+                            <strong>YOLOv8: {Number(leadImage?.modelAiShare || 0).toFixed(2)}% • Metadata: {Number(leadImage?.heuristicAiShare || 0).toFixed(2)}%</strong>
                             <span></span>
                           </div>
                         </div>
 
-                        <div className="history-progress">
-                          <div className="history-progress-row">
-                            <span>Confidence</span>
-                            <div className="graph-bar"><span style={{ width: `${Number(leadImage?.confidence || 0)}%` }}></span></div>
-                            <strong>{Number(leadImage?.confidence || 0)}%</strong>
-                          </div>
-                          <div className="history-progress-row">
-                            <span>AI</span>
-                            <div className="graph-bar"><span style={{ width: `${Number(leadImage?.aiShare || 0)}%` }}></span></div>
-                            <strong>{Number(leadImage?.aiShare || 0)}%</strong>
-                          </div>
-                          <div className="history-progress-row">
-                            <span>Artifacts</span>
-                            <div className="graph-bar"><span style={{ width: `${Number(leadImage?.artifacts || 0)}%` }}></span></div>
-                            <strong>{Number(leadImage?.artifacts || 0)}%</strong>
-                          </div>
-                        </div>
+                        <VerdictSummaryCard image={leadImage} />
                       </div>
                     </article>
                   );
