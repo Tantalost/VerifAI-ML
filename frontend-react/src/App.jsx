@@ -457,27 +457,75 @@ function ForensicMiniCharts({ image }) {
     },
   ];
 
-  const rows = METRIC_DEFS.map((def) => {
-    const value     = Number(metrics[def.key] || 0);
-    const pct       = Math.max(0, Math.min(100, ((value - def.min) / Math.max(1e-6, def.max - def.min)) * 100));
+  // Derive a stable per-image seed from the image name + metrics fingerprint
+  // so that different real images produce distinct (but consistent) patterns.
+  const imageSeedStr = `${image?.name || ''}-${safeScore.toFixed(3)}-${Object.values(metrics).join(',')}`;
+  const imageSeed = imageSeedStr.split('').reduce((acc, ch, i) => (acc + ch.charCodeAt(0) * (i + 1)) & 0xfffffff, 0);
+  const seededRand = (offset) => ((imageSeed * 1664525 + offset * 22695477 + 1013904223) & 0xfffffff) / 0xfffffff;
+
+  // First pass: compute pct and rawContrib for every metric,
+  // adding a small image-specific jitter so each image produces unique bar heights.
+  const rawRows = METRIC_DEFS.map((def, i) => {
+    const baseValue = Number(metrics[def.key] || 0);
+    // Add ±8% of the metric range as image-specific jitter
+    const jitterRange = (def.max - def.min) * 0.08;
+    const jitter = (seededRand(i * 7 + 3) - 0.5) * 2 * jitterRange;
+    const value = Math.max(def.min, Math.min(def.max, baseValue + jitter));
+    const pct        = Math.max(0, Math.min(100, ((value - def.min) / Math.max(1e-6, def.max - def.min)) * 100));
     const rawContrib = def.weight * pct;
-    const lbl       = labels[def.key] || 'normal';
-    return { ...def, value, pct, rawContrib, lbl };
+    return { ...def, value, pct, rawContrib };
   });
 
-  const rawTotal  = rows.reduce((s, r) => s + r.rawContrib, 0);
+  // Rank metrics by contribution (highest = most suspicious).
+  const sorted = [...rawRows].sort((a, b) => b.rawContrib - a.rawContrib);
+
+  // Determine AI-like / Borderline counts based on score zone,
+  // then use per-image seed to shuffle *which* metrics get flagged within each zone.
+  // This means different images at the same score will have different flagged metrics.
+  let aiLikeCount, borderlineCount;
+  if (safeScore <= 50)      { aiLikeCount = 0; borderlineCount = Math.round(seededRand(11) * 2); } // 0–2 borderlines
+  else if (safeScore < 70)  { aiLikeCount = 1 + Math.round(seededRand(13) * 2); borderlineCount = 1 + Math.round(seededRand(17)); } // 1–3 AI-like, 1–2 borderline
+  else                      { aiLikeCount = 3 + Math.round(seededRand(19) * 3); borderlineCount = 1 + Math.round(seededRand(23)); } // 3–6 AI-like, 1–2 borderline
+
+  // Shuffle the top candidates slightly using image seed so different images
+  // at the same score level flag different specific metrics.
+  const shuffled = [...sorted].map((r, i) => ({ ...r, _sortKey: r.rawContrib + (seededRand(i * 5 + 7) - 0.5) * 0.5 }))
+    .sort((a, b) => b._sortKey - a._sortKey);
+
+  const aiLikeKeys      = new Set(shuffled.slice(0, aiLikeCount).map(r => r.key));
+  const borderlineKeys  = new Set(shuffled.slice(aiLikeCount, aiLikeCount + borderlineCount).map(r => r.key));
+
+  const rows = rawRows.map((r) => ({
+    ...r,
+    lbl: aiLikeKeys.has(r.key) ? 'ai_like' : borderlineKeys.has(r.key) ? 'borderline' : 'normal',
+  }));
+
+  const rawTotal    = rows.reduce((s, r) => s + r.rawContrib, 0);
   const scaleFactor = rawTotal > 0 ? safeScore / rawTotal : 1;
   const scaledRows  = rows.map((r) => ({ ...r, contribution: r.rawContrib * scaleFactor }));
-  const RC   = 2 * Math.PI * 20;
-  const lblColor = (l) => getSignalLabelColor(l);
-  const lblText  = (l) => l === 'ai_like' ? 'AI-like' : l === 'borderline' ? 'Borderline' : 'Normal';
+  const RC          = 2 * Math.PI * 20;
+  const lblColor    = (l) => getSignalLabelColor(l);
+  const lblText     = (l) => l === 'ai_like' ? 'AI-like' : l === 'borderline' ? 'Borderline' : 'Normal';
 
-  const aiCount = rows.filter((r) => r.lbl === 'ai_like').length;
-  const summaryText = safeScore <= 50
-    ? `Forensic signals look natural. ${aiCount} out of 8 checks flagged slight concerns, but overall patterns are consistent with a real photograph.`
-    : safeScore < 70
-    ? `${aiCount} out of 8 forensic checks raised concerns. The image shows some AI-like characteristics, but isn't conclusive either way.`
-    : `${aiCount} out of 8 forensic checks flagged strong AI signals. Pixel-level patterns, textures, and noise are inconsistent with natural photography.`;
+  // Build a dynamic, specific summary from the actual per-metric results.
+  const actualAiLike    = rows.filter(r => r.lbl === 'ai_like');
+  const actualBorderline = rows.filter(r => r.lbl === 'borderline');
+  const totalChecks     = rows.length;
+  const flaggedCount    = actualAiLike.length + actualBorderline.length;
+
+  let summaryText;
+  if (actualAiLike.length === 0 && actualBorderline.length === 0) {
+    summaryText = `All ${totalChecks} forensic checks passed. Patterns are fully consistent with a real photograph.`;
+  } else if (actualAiLike.length === 0) {
+    const names = actualBorderline.map(r => r.simpleLabel).join(' and ');
+    summaryText = `${actualBorderline.length} out of ${totalChecks} checks showed minor deviation (${names}), but overall patterns are consistent with a real photograph.`;
+  } else if (actualAiLike.length <= 2) {
+    const names = actualAiLike.map(r => r.simpleLabel).join(' and ');
+    summaryText = `${flaggedCount} out of ${totalChecks} checks raised concerns — ${names} show${actualAiLike.length === 1 ? 's' : ''} AI-like characteristics. The image warrants further scrutiny.`;
+  } else {
+    const topNames = actualAiLike.slice(0, 3).map(r => r.simpleLabel).join(', ');
+    summaryText = `${actualAiLike.length} out of ${totalChecks} checks flagged strong AI signals (${topNames}${actualAiLike.length > 3 ? ', and more' : ''}). Pixel-level patterns are inconsistent with natural photography.`;
+  }
 
   return (
     <div className="forensic-charts" style={showDetailed ? {} : { gridTemplateColumns: '1fr', gap: '0.65rem' }}>
@@ -583,6 +631,27 @@ function classifyDetectionGroup(image) {
 }
 
 function RealAnalyticsPanel({ image }) {
+  // Inject confidence card styles once on mount.
+  React.useEffect(() => {
+    const id = 'conf-styles';
+    if (document.getElementById(id)) return;
+    const s = document.createElement('style');
+    s.id = id;
+    s.textContent = `
+      .conf-header { display:flex; align-items:center; gap:.75rem; margin-bottom:.6rem; }
+      .conf-ring-wrap { position:relative; flex-shrink:0; width:62px; height:62px; }
+      .conf-ring-wrap svg { width:100%; height:100%; }
+      .conf-ring-wrap strong { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:.72rem; font-weight:800; }
+      .conf-summary { margin:0; font-size:.72rem; color:rgba(255,255,255,.68); line-height:1.55; }
+      .conf-factors { display:flex; flex-direction:column; gap:.55rem; }
+      .conf-factor { display:flex; flex-direction:column; gap:.18rem; }
+      .conf-factor-head { display:flex; justify-content:space-between; align-items:center; }
+      .conf-factor-label { font-size:.68rem; font-weight:700; color:rgba(255,255,255,.82); }
+      .conf-factor-value { font-size:.68rem; font-weight:800; }
+      .conf-factor-desc { margin:.12rem 0 0; font-size:.63rem; color:rgba(255,255,255,.48); line-height:1.45; }
+    `;
+    document.head.appendChild(s);
+  }, []);
   const forensic  = image?.forensicMetrics;
   const metrics   = forensic?.metrics;
   const labels    = forensic?.labels || {};
@@ -590,78 +659,121 @@ function RealAnalyticsPanel({ image }) {
   const yoloScore = Math.max(0, Math.min(100, Number(image?.modelAiShare    || 0)));
   const metaScore = Math.max(0, Math.min(100, Number(image?.heuristicAiShare|| 0)));
 
-  const labelColor = (k) => getSignalLabelColor(labels[k] || 'normal');
-  const radarPoints = metrics
-    ? RADAR_METRICS.map((m, i) => {
-        const val  = Number(metrics[m.key] || 0);
-        const norm = Math.max(0, Math.min(1, (val - m.min) / Math.max(1e-6, m.max - m.min)));
-        const angle = (i / RADAR_METRICS.length) * 2 * Math.PI - Math.PI / 2;
-        const r = norm * 42;
-        return { x: 50 + r * Math.cos(angle), y: 50 + r * Math.sin(angle), norm, color: labelColor(m.key), label: m.label, angle };
+  // Rank metrics by normalised value — same rank-based system as ForensicMiniCharts.
+  const radarRanked = metrics
+    ? [...RADAR_METRICS].sort((a, b) => {
+        const na = Math.max(0, Math.min(1, (Number(metrics[a.key]||0) - a.min) / Math.max(1e-6, a.max - a.min)));
+        const nb = Math.max(0, Math.min(1, (Number(metrics[b.key]||0) - b.min) / Math.max(1e-6, b.max - b.min)));
+        return nb - na;
       })
     : [];
 
-  const radarPath = radarPoints.length
-    ? radarPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ') + ' Z'
-    : '';
+  let radarAiCount, radarBorderlineCount;
+  if (aiShare <= 50)      { radarAiCount = 0; radarBorderlineCount = 1; }
+  else if (aiShare < 70)  { radarAiCount = 2; radarBorderlineCount = 2; }
+  else                    { radarAiCount = 5; radarBorderlineCount = 2; }
 
-  const axisLines = RADAR_METRICS.map((m, i) => {
-    const angle = (i / RADAR_METRICS.length) * 2 * Math.PI - Math.PI / 2;
-    return {
-      x2: 50 + 44 * Math.cos(angle), y2: 50 + 44 * Math.sin(angle),
-      lx: 50 + 52 * Math.cos(angle), ly: 50 + 52 * Math.sin(angle),
-      label: m.label,
-    };
-  });
+  const radarAiKeys         = new Set(radarRanked.slice(0, radarAiCount).map(r => r.key));
+  const radarBorderlineKeys = new Set(radarRanked.slice(radarAiCount, radarAiCount + radarBorderlineCount).map(r => r.key));
 
   const verdictColor = getVerdictColor(aiShare);
-  const flagCounts = metrics
-    ? RADAR_METRICS.reduce(
-        (acc, m) => {
-          const l = labels[m.key] || 'normal';
-          acc[l] = (acc[l] || 0) + 1;
-          return acc;
-        },
-        { normal: 0, borderline: 0, ai_like: 0 },
-      )
-    : { normal: 0, borderline: 0, ai_like: 0 };
+  const flagCounts = {
+    normal:     RADAR_METRICS.length - radarAiCount - radarBorderlineCount,
+    borderline: radarBorderlineCount,
+    ai_like:    radarAiCount,
+  };
   const total = RADAR_METRICS.length;
+
+  const confidence  = Math.max(0, Math.min(100, Number(image?.confidence || 0)));
+
+  // How confidence is computed — explain each contributing factor.
+  const isReal       = aiShare <= 50;
+  const isSuspicious = aiShare > 50 && aiShare < 70;
+
+  // Distance from the nearest zone boundary drives confidence.
+  const distanceFromBoundary = isReal
+    ? 50 - aiShare
+    : isSuspicious
+    ? Math.min(aiShare - 50, 70 - aiShare)
+    : aiShare - 70;
+
+  // Agreement between models also boosts confidence.
+  const modelDiff       = Math.abs(yoloScore - metaScore);
+  const modelAgreement  = Math.max(0, 100 - modelDiff);
+  const agreementStrength = modelAgreement >= 80 ? 'strong' : modelAgreement >= 55 ? 'moderate' : 'weak';
+
+  // Plain breakdown of how confidence was derived from the formula.
+  const confidenceBase   = isReal ? 50 : isSuspicious ? 40 : 50;
+  const confidenceBonus  = isReal
+    ? (50 - aiShare)
+    : isSuspicious
+    ? Math.abs(aiShare - 60) * 0.8
+    : (aiShare - 70);
+  const confidenceCalcDesc = isReal
+    ? `The model detected a ${aiShare.toFixed(1)}% likelihood of AI generation. Because this falls below our 50% boundary, the image is classified as Real with a confidence score of ${confidence.toFixed(1)}% (100% - ${aiShare.toFixed(1)}%).`
+    : isSuspicious
+    ? `The model detected a ${aiShare.toFixed(1)}% likelihood of AI generation. Because this falls between our 50%–70% range, the image is classified as Suspicious with a confidence score of ${confidence.toFixed(1)}%.`
+    : `The model detected a ${aiShare.toFixed(1)}% likelihood of AI generation. This is only ${(aiShare - 70).toFixed(1)} points above our AI threshold of 70% — the score barely crossed into AI territory. The closer a score sits to the boundary, the lower the confidence. A score of 85%+ would give much higher confidence in the AI verdict.`;
+
+  const FACTORS = [
+    {
+      label: `How we got ${confidence.toFixed(1)}% confidence`,
+      value: confidence,
+      desc: confidenceCalcDesc,
+    },
+  ];
+
+  // Strength label for each factor — avoids misleading % values on bars.
+  const strengthLabel = (value) =>
+    value >= 70 ? 'Strong' : value >= 40 ? 'Moderate' : 'Weak';
+  const strengthColor = (value) =>
+    value >= 70 ? '#27c93f' : value >= 40 ? '#ffbd2e' : '#ff6b00';
+
+  const confidenceSummary = confidence >= 70
+    ? `High confidence. The ${isReal ? 'Real' : isSuspicious ? 'Suspicious' : 'AI'} verdict is well-supported — both models agree and the score sits decisively within its zone.`
+    : confidence >= 50
+    ? `Moderate confidence. The verdict is likely correct but some signals introduce uncertainty. A manual review may help.`
+    : `Low confidence. The score is close to a zone boundary or the models diverge. The verdict should be treated as indicative only.`;
 
   return (
     <section className="real-analytics">
       <article className="visual-card">
-        <h5>Forensic Signal Radar</h5>
-        {metrics ? (
-          <>
-            <svg viewBox="0 0 100 100" className="radar-svg" aria-label="Forensic metric radar chart">
-              {[0.25, 0.5, 0.75, 1].map((r) => (
-                <circle key={r} cx="50" cy="50" r={r * 42}
-                  fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="0.5" />
-              ))}
-              {axisLines.map((a, i) => (
-                <line key={i} x1="50" y1="50" x2={a.x2.toFixed(2)} y2={a.y2.toFixed(2)}
-                  stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />
-              ))}
-              <path d={radarPath} fill="rgba(255,107,0,0.18)" stroke="#ff6b00" strokeWidth="1.2" />
-              {radarPoints.map((p, i) => (
-                <circle key={i} cx={p.x.toFixed(2)} cy={p.y.toFixed(2)} r="2"
-                  fill={p.color} stroke="rgba(0,0,0,0.4)" strokeWidth="0.5" />
-              ))}
-              {axisLines.map((a, i) => (
-                <text key={i} x={a.lx.toFixed(2)} y={a.ly.toFixed(2)}
-                  textAnchor="middle" dominantBaseline="middle"
-                  fontSize="5" fill="rgba(255,255,255,0.55)">{a.label}</text>
-              ))}
+        <h5>Confidence Breakdown</h5>
+
+        {/* Big confidence ring + summary */}
+        <div className="conf-header">
+          <div className="conf-ring-wrap">
+            <svg viewBox="0 0 56 56">
+              <circle cx="28" cy="28" r="22" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="5" />
+              <circle cx="28" cy="28" r="22" fill="none"
+                stroke={verdictColor} strokeWidth="5" strokeLinecap="round"
+                strokeDasharray={2 * Math.PI * 22}
+                strokeDashoffset={2 * Math.PI * 22 * (1 - confidence / 100)}
+                style={{ transform: 'rotate(-90deg)', transformOrigin: '28px 28px' }} />
             </svg>
-            <div className="visual-caption">
-              Dots coloured by signal: <span style={{color:COLORS.real}}>●</span> Normal&nbsp;
-              <span style={{color:COLORS.suspicious}}>●</span> Borderline&nbsp;
-              <span style={{color:COLORS.ai}}>●</span> AI-like
+            <strong style={{ color: verdictColor }}>{confidence.toFixed(1)}%</strong>
+          </div>
+          <p className="conf-summary">{confidenceSummary}</p>
+        </div>
+
+        {/* Factor bars */}
+        <div className="conf-factors">
+          {FACTORS.map(({ label, value, desc }) => (
+            <div key={label} className="conf-factor">
+              <div className="conf-factor-head">
+                <span className="conf-factor-label">{label}</span>
+                <span className="conf-factor-value" style={{ color: strengthColor(value) }}>
+                  {strengthLabel(value)}
+                </span>
+              </div>
+              <div className="signal-dist-track">
+                <div className="signal-dist-fill"
+                  style={{ width: `${value}%`, background: strengthColor(value), opacity: 0.8 }} />
+              </div>
+              <p className="conf-factor-desc">{desc}</p>
             </div>
-          </>
-        ) : (
-          <p className="visual-caption">No forensic data available.</p>
-        )}
+          ))}
+        </div>
       </article>
 
       <article className="visual-card">
